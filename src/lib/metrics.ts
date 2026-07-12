@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import {
   amortizationSchedule,
   computeMetrics,
+  loanAmount,
   monthlyPayment,
   type AmortizationRow,
   type LedgerEntry,
@@ -199,5 +200,180 @@ export async function getYearData(
     expenseByCategory,
     excluded,
     transactionCount: txns.length,
+  };
+}
+
+// ---- All-years / portfolio summary ----------------------------------------
+
+export interface YearRow {
+  year: number;
+  hasData: boolean;
+  income: number;
+  operatingExpenses: number;
+  capitalExpenses: number;
+  excluded: number;
+  noi: number;
+  interest: number;
+  principal: number;
+  cashFlow: number | null; // null for years with no recorded transactions
+  endingBalance: number;
+}
+
+export interface PortfolioSummary {
+  property: Property;
+  hasLoan: boolean;
+  monthlyPayment: number;
+  originalLoan: number;
+  currentBalance: number; // as of today
+  principalPaid: number; // originalLoan - currentBalance (equity built)
+  pctPaid: number;
+  years: YearRow[];
+  // Totals across years that have recorded transactions:
+  totalIncome: number;
+  totalOperatingExpenses: number;
+  totalCapital: number;
+  totalExcluded: number;
+  totalNoi: number;
+  totalInterest: number;
+  totalCashFlow: number;
+  netPosition: number; // totalCashFlow + principalPaid
+  recordedYearCount: number;
+}
+
+export async function getPortfolioSummary(
+  property: Property,
+): Promise<PortfolioSummary> {
+  const txns = await prisma.transaction.findMany({
+    where: { propertyId: property.id },
+    orderBy: { date: "asc" },
+  });
+
+  const hasLoan = !!(
+    property.loanTermYears &&
+    property.purchaseDate &&
+    property.loanRate != null
+  );
+  const terms = loanTermsOf(property);
+  const originalLoan = hasLoan ? loanAmount(terms) : 0;
+
+  // Amortization schedule with a UTC calendar date on each payment.
+  const firstPayment = property.purchaseDate
+    ? addMonths(property.purchaseDate, 1)
+    : null;
+  const dated = (hasLoan ? amortizationSchedule(terms) : []).map((row) => ({
+    ...row,
+    date: firstPayment
+      ? addMonths(firstPayment, row.paymentNumber - 1)
+      : new Date(0),
+  }));
+
+  const balanceAsOf = (when: Date): number => {
+    if (!hasLoan) return 0;
+    const paid = dated.filter((r) => r.date.getTime() <= when.getTime());
+    return paid.length ? paid[paid.length - 1].balance : originalLoan;
+  };
+  // Payments in `year`, but never beyond today — so the current (incomplete) year
+  // reflects principal paid *so far*, not a projection of the rest of the year.
+  const nowMs = new Date().getTime();
+  const windowForYear = (year: number) =>
+    dated.filter(
+      (r) => r.date.getUTCFullYear() === year && r.date.getTime() <= nowMs,
+    );
+
+  const propInputs = {
+    purchasePrice: property.purchasePrice,
+    buildingValuePct: property.buildingValuePct,
+    downPaymentPct: property.downPaymentPct ?? 0,
+    annualRate: property.loanRate ?? 0,
+    termYears: property.loanTermYears ?? 0,
+    points: property.points ?? 0,
+    closingCosts: property.closingCosts ?? 0,
+  };
+
+  const now = new Date();
+  const currentYear = now.getUTCFullYear();
+  const purchaseYear =
+    property.purchaseDate?.getUTCFullYear() ??
+    txns[0]?.date.getUTCFullYear() ??
+    currentYear;
+  const lastTxnYear = txns.length
+    ? txns[txns.length - 1].date.getUTCFullYear()
+    : currentYear;
+  const endYear = Math.max(currentYear, lastTxnYear);
+
+  const byYear = new Map<number, Transaction[]>();
+  for (const t of txns) {
+    const y = t.date.getUTCFullYear();
+    if (!byYear.has(y)) byYear.set(y, []);
+    byYear.get(y)!.push(t);
+  }
+
+  const years: YearRow[] = [];
+  let totalIncome = 0,
+    totalOperatingExpenses = 0,
+    totalCapital = 0,
+    totalExcluded = 0,
+    totalNoi = 0,
+    totalInterest = 0,
+    totalCashFlow = 0,
+    recordedYearCount = 0;
+
+  for (let y = purchaseYear; y <= endYear; y++) {
+    const entries = byYear.get(y) ?? [];
+    const window = windowForYear(y);
+    const m = computeMetrics(entries.map(toLedgerEntry), propInputs, 12, window);
+    const hasData = entries.length > 0;
+
+    years.push({
+      year: y,
+      hasData,
+      income: m.grossIncome,
+      operatingExpenses: m.operatingExpenses,
+      capitalExpenses: m.capitalExpenses,
+      excluded: m.excludedTotal,
+      noi: m.netOperatingIncome,
+      interest: m.mortgageInterest,
+      principal: m.mortgagePrincipal,
+      cashFlow: hasData ? m.cashFlow : null,
+      // Year-end balance, or today's balance for the current (incomplete) year.
+      endingBalance: balanceAsOf(
+        new Date(Math.min(Date.UTC(y, 11, 31), now.getTime())),
+      ),
+    });
+
+    if (hasData) {
+      totalIncome += m.grossIncome;
+      totalOperatingExpenses += m.operatingExpenses;
+      totalCapital += m.capitalExpenses;
+      totalExcluded += m.excludedTotal;
+      totalNoi += m.netOperatingIncome;
+      totalInterest += m.mortgageInterest;
+      totalCashFlow += m.cashFlow;
+      recordedYearCount++;
+    }
+  }
+
+  const currentBalance = balanceAsOf(now);
+  const principalPaid = originalLoan - currentBalance;
+  const pctPaid = originalLoan > 0 ? principalPaid / originalLoan : 0;
+
+  return {
+    property,
+    hasLoan,
+    monthlyPayment: hasLoan ? monthlyPayment(terms) : 0,
+    originalLoan,
+    currentBalance,
+    principalPaid,
+    pctPaid,
+    years,
+    totalIncome,
+    totalOperatingExpenses,
+    totalCapital,
+    totalExcluded,
+    totalNoi,
+    totalInterest,
+    totalCashFlow,
+    netPosition: totalCashFlow + principalPaid,
+    recordedYearCount,
   };
 }

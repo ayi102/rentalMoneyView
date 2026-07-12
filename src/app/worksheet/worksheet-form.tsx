@@ -60,6 +60,7 @@ export function WorksheetForm({
   const [pending, setPending] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const touch = () => {
     setDirty(true);
@@ -131,16 +132,7 @@ export function WorksheetForm({
     };
   }, [groups, constants]);
 
-  async function onDelete() {
-    const total = groups.reduce((n, g) => n + g.items.length, 0);
-    if (
-      !confirm(
-        `Delete all entries for ${year}? This removes ${total} line${
-          total === 1 ? "" : "s"
-        } and can't be undone.`,
-      )
-    )
-      return;
+  async function doDelete() {
     setPending(true);
     try {
       await deleteYear(propertyId, year);
@@ -148,6 +140,7 @@ export function WorksheetForm({
       router.refresh();
     } finally {
       setPending(false);
+      setConfirmingDelete(false);
     }
   }
 
@@ -218,13 +211,36 @@ export function WorksheetForm({
           One line = a single value; “+ itemize” to break it out. Untick the dot to keep
           a line but leave it out of totals.
         </span>
-        <button
-          onClick={onDelete}
-          disabled={pending}
-          className="text-sm text-negative hover:underline disabled:opacity-50"
-        >
-          Delete {year}
-        </button>
+        {confirmingDelete ? (
+          <span className="flex items-center gap-2 text-sm">
+            <span className="text-negative">
+              Delete all {groups.reduce((n, g) => n + g.items.length, 0)} lines for{" "}
+              {year}?
+            </span>
+            <button
+              onClick={() => setConfirmingDelete(false)}
+              disabled={pending}
+              className="rounded-md border border-border px-2.5 py-1 text-muted hover:text-foreground"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={doDelete}
+              disabled={pending}
+              className="rounded-md bg-negative px-2.5 py-1 font-medium text-white disabled:opacity-50"
+            >
+              {pending ? "Deleting…" : "Yes, delete"}
+            </button>
+          </span>
+        ) : (
+          <button
+            onClick={() => setConfirmingDelete(true)}
+            disabled={pending}
+            className="text-sm text-negative hover:underline disabled:opacity-50"
+          >
+            Delete {year}
+          </button>
+        )}
       </div>
     </div>
   );

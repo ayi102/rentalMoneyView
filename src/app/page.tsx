@@ -72,8 +72,20 @@ export default async function HomeAllYears() {
         </p>
       </div>
 
-      {/* Headline: overall position */}
+      {/* Headline: overall position — cash view and with-equity view */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard
+          label="Net (cash)"
+          value={currency(s.cashProfit)}
+          sub={`cash flow − ${currency(s.purchaseCosts)} buy-in · no equity`}
+          tone={s.cashProfit >= 0 ? "positive" : "negative"}
+        />
+        <StatCard
+          label="Net (with equity)"
+          value={currency(s.netPosition)}
+          sub={`+ ${currency(s.principalPaid)} loan paid down`}
+          tone={s.netPosition >= 0 ? "positive" : "negative"}
+        />
         <StatCard
           label="Total Cash Flow"
           value={currency(s.totalCashFlow)}
@@ -83,21 +95,9 @@ export default async function HomeAllYears() {
           tone={s.totalCashFlow >= 0 ? "positive" : "negative"}
         />
         <StatCard
-          label="Principal Paid"
-          value={currency(s.principalPaid)}
-          sub={`equity built · ${percent(s.pctPaid)} of loan`}
-          tone="positive"
-        />
-        <StatCard
-          label="Net Position"
-          value={currency(s.netPosition)}
-          sub={`equity + cash flow − ${currency(s.initialInvestment)} invested`}
-          tone={s.netPosition >= 0 ? "positive" : "negative"}
-        />
-        <StatCard
           label="Loan Balance"
           value={currency(s.currentBalance)}
-          sub={`from ${currency(s.originalLoan)} original`}
+          sub={`${currency(s.principalPaid)} paid of ${currency(s.originalLoan)}`}
         />
       </div>
 
@@ -217,11 +217,13 @@ export default async function HomeAllYears() {
       </section>
 
       <p className="text-xs text-muted">
-        Click a year to open its worksheet. <strong>Net Position</strong> is your
-        equity at cost ({currency(s.equityAtCost)}) plus cash flow, minus the{" "}
-        {currency(s.initialInvestment)} you put in to buy (down payment + points +
-        closing) — so it reflects the purchase cost. It assumes no appreciation;
-        the Projection tab adds market value and shows NPV/IRR/MIRR.
+        Click a year to open its worksheet. <strong>Net (cash)</strong> is what the
+        rental earned minus the {currency(s.purchaseCosts)} of points + closing to
+        buy in — it does not count equity. <strong>Net (with equity)</strong> adds
+        the {currency(s.principalPaid)} of loan you&apos;ve paid down. Your down
+        payment is treated as neutral in both (it&apos;s your stake, still in the
+        house). Neither assumes appreciation — the Projection tab adds market value
+        and shows NPV/IRR/MIRR.
       </p>
     </div>
   );

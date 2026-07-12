@@ -361,8 +361,10 @@ export interface PortfolioSummary {
   totalInterest: number;
   totalCashFlow: number;
   initialInvestment: number; // down payment + points + closing
+  purchaseCosts: number; // points + closing (non-recoverable buy-in)
   equityAtCost: number; // purchase price − current balance
-  netPosition: number; // equityAtCost + totalCashFlow − initialInvestment
+  cashProfit: number; // totalCashFlow − purchaseCosts (no equity counted)
+  netPosition: number; // cashProfit + principalPaid (equity included)
   recordedYearCount: number;
 }
 
@@ -488,12 +490,16 @@ export async function getPortfolioSummary(
     property.purchasePrice * (property.downPaymentPct ?? 0) +
     (property.points ?? 0) +
     (property.closingCosts ?? 0);
-  // Equity held today, valued at cost (no appreciation — that lives in Projection):
-  // purchase price minus what's still owed = your down payment + principal paid.
+  // Non-recoverable buy-in costs (points + closing). The down payment is excluded
+  // because it's your stake sitting in the house, not a cost.
+  const purchaseCosts = (property.points ?? 0) + (property.closingCosts ?? 0);
+  // Cash view (no equity): what the rental earned in cash minus the buy-in costs.
+  const cashProfit = totalCashFlow - purchaseCosts;
+  // Equity held today, valued at cost (no appreciation — that lives in Projection).
   const equityAtCost = property.purchasePrice - currentBalance;
-  // Net position = what you'd hold if you sold at cost today, plus cash collected,
-  // minus everything you put in. This now includes the purchase costs.
-  const netPosition = equityAtCost + totalCashFlow - initialInvestment;
+  // With-equity view: the cash view plus the loan paydown (equity built).
+  // Equivalently equityAtCost + totalCashFlow − initialInvestment.
+  const netPosition = cashProfit + principalPaid;
 
   return {
     property,
@@ -512,7 +518,9 @@ export async function getPortfolioSummary(
     totalInterest,
     totalCashFlow,
     initialInvestment,
+    purchaseCosts,
     equityAtCost,
+    cashProfit,
     netPosition,
     recordedYearCount,
   };

@@ -97,7 +97,6 @@ export default async function WorksheetPage({
         propertyId={property.id}
         year={year}
         groups={data.groups}
-        excluded={data.excluded}
         constants={{
           mortgageInterest: data.mortgageInterest,
           debtService: data.debtService,

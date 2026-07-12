@@ -12,8 +12,8 @@ log every dollar in and out, but decide per entry what actually counts.
 - **Worksheet (per year)** — the editable, AOPD-style grid *and* that year's key
   numbers (cash flow, cap rate, cash-on-cash, taxable income) on top. One row per
   category with live NOI / cash flow / taxable totals; each category can be a single
-  value **or** broken into line items that roll up. A "tracked but not counted"
-  section holds items you keep for the record but exclude from totals. This is the
+  value **or** broken into line items that roll up. Every line has a **track toggle**
+  — untrack a line to keep it on record but leave it out of the totals. This is the
   source of truth for a year's figures.
 - **Projection** — NPV, IRR, and MIRR from your actual cash flows, plus a
   value/loan/equity-over-time chart, with editable assumptions.

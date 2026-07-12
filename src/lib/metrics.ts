@@ -108,10 +108,12 @@ export async function getTransactionsForYear(
 export interface WorksheetItem {
   description: string;
   amount: number;
+  tracked: boolean; // false = recorded but excluded from totals
 }
 
-// One category (or subcategory) with its line items. Total = sum of items.
-// A single lump value is just one item; itemizing adds more.
+// One category (or subcategory) with its line items. Total = sum of TRACKED items.
+// A single lump value is just one item; itemizing adds more. Any item can be
+// toggled "not tracked" so it's kept for the record but left out of totals.
 export interface WorksheetGroup {
   kind: "income" | "expense";
   category: string; // stored category (parent name for subs)
@@ -120,20 +122,11 @@ export interface WorksheetGroup {
   items: WorksheetItem[];
 }
 
-export interface WorksheetExcluded {
-  kind: "income" | "expense";
-  category: string;
-  subcategory: string | null;
-  description: string;
-  amount: number;
-}
-
 export interface WorksheetData {
   property: Property;
   year: number;
   availableYears: number[];
   groups: WorksheetGroup[];
-  excluded: WorksheetExcluded[];
   // constants for live totals as the user types
   mortgageInterest: number;
   debtService: number;
@@ -158,13 +151,17 @@ export async function getWorksheetData(
   const keyOf = (kind: string, cat: string, sub: string | null) =>
     `${kind}|${cat}|${sub ?? ""}`;
 
-  // Counted transactions grouped into line items per (kind, category, sub).
+  // All transactions grouped into line items per (kind, category, sub).
+  // Untracked (countsTowardCost=false) items are included with tracked=false.
   const itemsByKey = new Map<string, WorksheetItem[]>();
   for (const t of txns) {
-    if (!t.countsTowardCost) continue;
     const k = keyOf(t.kind, t.category, t.subcategory);
     const arr = itemsByKey.get(k) ?? [];
-    arr.push({ description: t.description ?? "", amount: t.amount });
+    arr.push({
+      description: t.description ?? "",
+      amount: t.amount,
+      tracked: t.countsTowardCost,
+    });
     itemsByKey.set(k, arr);
   }
 
@@ -196,26 +193,14 @@ export async function getWorksheetData(
       else pushGroup(kind, c.name, null);
     }
   }
-  // Any counted (category, subcategory) present in data but not the taxonomy.
+  // Any (category, subcategory) present in data but not the taxonomy.
   for (const t of txns) {
-    if (!t.countsTowardCost) continue;
     pushGroup(
       t.kind === "income" ? "income" : "expense",
       t.category,
       t.subcategory,
     );
   }
-
-  // Excluded (tracked but not counted) items — a free list.
-  const excluded: WorksheetExcluded[] = txns
-    .filter((t) => !t.countsTowardCost)
-    .map((t) => ({
-      kind: t.kind === "income" ? "income" : "expense",
-      category: t.category,
-      subcategory: t.subcategory,
-      description: t.description ?? "",
-      amount: t.amount,
-    }));
 
   const window = scheduleWindowForYear(property, year);
   const mortgageInterest = window.reduce((s, r) => s + r.interest, 0);
@@ -226,7 +211,6 @@ export async function getWorksheetData(
     year,
     availableYears: await getAvailableYears(property.id),
     groups,
-    excluded,
     mortgageInterest,
     debtService,
     depreciation: annualDepreciation(

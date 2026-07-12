@@ -71,7 +71,6 @@ export async function saveWorksheet(
   ]);
 
   revalidatePath("/");
-  revalidatePath("/summary");
   revalidatePath("/worksheet");
   revalidatePath("/projection");
 }
@@ -104,5 +103,5 @@ export async function updateAssumptions(
     },
   });
   revalidatePath("/projection");
-  revalidatePath("/summary");
+  revalidatePath("/");
 }

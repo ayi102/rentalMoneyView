@@ -1,11 +1,7 @@
 import Link from "next/link";
-import { getDefaultProperty, getYearData } from "@/lib/metrics";
+import { getDefaultProperty, getPortfolioSummary } from "@/lib/metrics";
 import { currency, percent } from "@/lib/format";
-import { YearSelector } from "./year-selector";
-import {
-  ExpenseBreakdownChart,
-  IncomeBreakdownChart,
-} from "./dashboard-charts";
+import { LoanPaydownChart } from "./all-years-chart";
 
 export const dynamic = "force-dynamic";
 
@@ -39,11 +35,11 @@ function StatCard({
   );
 }
 
-export default async function Dashboard({
-  searchParams,
-}: {
-  searchParams: Promise<{ year?: string }>;
-}) {
+function num(v: number | null, opts?: { cents?: boolean }) {
+  return v === null ? <span className="text-muted">—</span> : currency(v, opts);
+}
+
+export default async function HomeAllYears() {
   const property = await getDefaultProperty();
   if (!property) {
     return (
@@ -60,126 +56,172 @@ export default async function Dashboard({
     );
   }
 
-  const sp = await searchParams;
-  const years = (await getYearData(property, new Date().getFullYear()))
-    .availableYears;
-  const year = sp.year ? Number(sp.year) : years[0];
-  const data = await getYearData(property, year);
-  const m = data.metrics;
+  const s = await getPortfolioSummary(property);
+  const chartData = s.years.map((y) => ({
+    year: y.year,
+    principal: y.principal,
+    balance: y.endingBalance,
+  }));
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold">{property.name}</h1>
-          <p className="text-sm text-muted">
-            {property.squareFeet ? `${property.squareFeet} ft² · ` : ""}
-            Purchased {currency(property.purchasePrice)} · Economic outlook
-          </p>
-        </div>
-        <YearSelector years={data.availableYears} current={year} />
-      </div>
-
-      {/* Headline metrics */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard
-          label="Cash Flow"
-          value={currency(m.cashFlow)}
-          sub={`${year} · after mortgage`}
-          tone={m.cashFlow >= 0 ? "positive" : "negative"}
-        />
-        <StatCard
-          label="Net Operating Income"
-          value={currency(m.netOperatingIncome)}
-          sub="income − operating expenses"
-          tone={m.netOperatingIncome >= 0 ? "positive" : "negative"}
-        />
-        <StatCard
-          label="Cap Rate"
-          value={percent(m.capRate)}
-          sub={`NOI / ${currency(property.purchasePrice)}`}
-        />
-        <StatCard
-          label="Cash-on-Cash"
-          value={percent(m.cashOnCashReturn)}
-          sub={`on ${currency(m.cashInvested)} invested`}
-          tone={m.cashOnCashReturn >= 0 ? "positive" : "negative"}
-        />
-      </div>
-
-      {/* Secondary metrics */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard label="Gross Income" value={currency(m.grossIncome)} sub="counted" />
-        <StatCard
-          label="Operating Expenses"
-          value={currency(m.operatingExpenses)}
-          sub="counted, non-capital"
-        />
-        <StatCard
-          label="Mortgage (P&I)"
-          value={currency(data.monthlyPayment)}
-          sub={`per month · ${currency(m.annualDebtService)}/yr`}
-        />
-        <StatCard
-          label="Taxable Income"
-          value={currency(m.taxableIncome)}
-          sub={`after ${currency(m.depreciation)} depreciation`}
-          tone={m.taxableIncome >= 0 ? "negative" : "positive"}
-        />
-      </div>
-
-      {/* Breakdowns (totals by category) */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <section className="rounded-xl border border-border bg-surface p-4">
-          <h2 className="mb-3 text-sm font-semibold">Income by category</h2>
-          <IncomeBreakdownChart data={data.incomeByCategory} />
-        </section>
-        <section className="rounded-xl border border-border bg-surface p-4">
-          <h2 className="mb-3 text-sm font-semibold">Where the money goes</h2>
-          <ExpenseBreakdownChart data={data.expenseByCategory} />
-        </section>
-      </div>
-
-      {/* Excluded panel — the "truth vs. counted" view */}
-      <section className="rounded-xl border border-border bg-surface p-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">
-            Tracked but not counted
-            <span className="ml-2 font-normal text-muted">
-              (in your records, excluded from real cost)
-            </span>
-          </h2>
-          <span className="text-sm font-semibold tabular-nums text-muted">
-            {currency(m.excludedTotal)}
-          </span>
-        </div>
-        {data.excluded.length === 0 ? (
-          <p className="mt-3 text-sm text-muted">
-            Nothing excluded this year — every entry counts toward your real cost.
-          </p>
-        ) : (
-          <ul className="mt-3 divide-y divide-border text-sm">
-            {data.excluded.map((e) => (
-              <li key={e.id} className="flex items-center justify-between py-2">
-                <span>
-                  <span className="font-medium">{e.category}</span>
-                  {e.description && (
-                    <span className="text-muted"> — {e.description}</span>
-                  )}
-                </span>
-                <span className="tabular-nums text-muted">
-                  {currency(e.amount, { cents: true })}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-        <p className="mt-3 text-xs text-muted">
-          If these <em>did</em> count, your cash flow would be{" "}
-          {currency(m.cashFlow - m.excludedTotal)}.
+      <div>
+        <h1 className="text-xl font-semibold">{property.name}</h1>
+        <p className="text-sm text-muted">
+          All-years overview · where you stand across every year
         </p>
+      </div>
+
+      {/* Headline: overall position */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard
+          label="Total Cash Flow"
+          value={currency(s.totalCashFlow)}
+          sub={`${s.recordedYearCount} recorded ${
+            s.recordedYearCount === 1 ? "year" : "years"
+          } · after mortgage`}
+          tone={s.totalCashFlow >= 0 ? "positive" : "negative"}
+        />
+        <StatCard
+          label="Principal Paid"
+          value={currency(s.principalPaid)}
+          sub={`equity built · ${percent(s.pctPaid)} of loan`}
+          tone="positive"
+        />
+        <StatCard
+          label="Net Position"
+          value={currency(s.netPosition)}
+          sub="cash flow + principal (equity)"
+          tone={s.netPosition >= 0 ? "positive" : "negative"}
+        />
+        <StatCard
+          label="Loan Balance"
+          value={currency(s.currentBalance)}
+          sub={`from ${currency(s.originalLoan)} original`}
+        />
+      </div>
+
+      {/* Loan paydown progress */}
+      {s.hasLoan && (
+        <section className="rounded-xl border border-border bg-surface p-4">
+          <div className="mb-2 flex items-center justify-between text-sm">
+            <h2 className="font-semibold">Loan paydown</h2>
+            <span className="text-muted">
+              {currency(s.principalPaid)} of {currency(s.originalLoan)} paid ·{" "}
+              {percent(s.pctPaid)}
+            </span>
+          </div>
+          <div className="h-3 w-full overflow-hidden rounded-full bg-background">
+            <div
+              className="h-full rounded-full bg-positive"
+              style={{ width: `${Math.min(100, Math.max(0, s.pctPaid * 100))}%` }}
+            />
+          </div>
+          <p className="mt-2 text-xs text-muted">
+            {currency(s.monthlyPayment)}/mo · balance {currency(s.currentBalance)}{" "}
+            remaining
+          </p>
+        </section>
+      )}
+
+      {/* Chart */}
+      <section className="rounded-xl border border-border bg-surface p-4">
+        <h2 className="mb-3 text-sm font-semibold">
+          Principal paid per year & loan balance
+        </h2>
+        <LoanPaydownChart data={chartData} />
       </section>
+
+      {/* Per-year table — click a year to open its worksheet */}
+      <section className="overflow-x-auto rounded-xl border border-border bg-surface">
+        <table className="w-full min-w-[720px] text-sm">
+          <thead>
+            <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted">
+              <th className="px-4 py-2.5 font-medium">Year</th>
+              <th className="px-4 py-2.5 text-right font-medium">Income</th>
+              <th className="px-4 py-2.5 text-right font-medium">Expenses</th>
+              <th className="px-4 py-2.5 text-right font-medium">Cash Flow</th>
+              <th className="px-4 py-2.5 text-right font-medium">Principal Gained</th>
+              <th className="px-4 py-2.5 text-right font-medium">Loan Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {s.years.map((y) => (
+              <tr
+                key={y.year}
+                className={`border-b border-border last:border-0 hover:bg-background ${
+                  y.hasData ? "" : "text-muted"
+                }`}
+              >
+                <td className="px-4 py-2.5 font-medium">
+                  <Link href={`/worksheet?year=${y.year}`} className="text-accent hover:underline">
+                    {y.year}
+                  </Link>
+                  {!y.hasData && (
+                    <span className="ml-2 text-xs font-normal text-muted">
+                      no data
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-2.5 text-right tabular-nums">
+                  {y.hasData ? currency(y.income) : num(null)}
+                </td>
+                <td className="px-4 py-2.5 text-right tabular-nums">
+                  {y.hasData ? currency(y.operatingExpenses) : num(null)}
+                </td>
+                <td
+                  className={`px-4 py-2.5 text-right font-medium tabular-nums ${
+                    y.cashFlow === null
+                      ? ""
+                      : y.cashFlow >= 0
+                        ? "text-positive"
+                        : "text-negative"
+                  }`}
+                >
+                  {num(y.cashFlow)}
+                </td>
+                <td className="px-4 py-2.5 text-right tabular-nums text-positive">
+                  {y.principal > 0 ? currency(y.principal) : num(null)}
+                </td>
+                <td className="px-4 py-2.5 text-right tabular-nums">
+                  {s.hasLoan ? currency(y.endingBalance) : num(null)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="border-t-2 border-border font-semibold">
+              <td className="px-4 py-3">Total</td>
+              <td className="px-4 py-3 text-right tabular-nums">
+                {currency(s.totalIncome)}
+              </td>
+              <td className="px-4 py-3 text-right tabular-nums">
+                {currency(s.totalOperatingExpenses)}
+              </td>
+              <td
+                className={`px-4 py-3 text-right tabular-nums ${
+                  s.totalCashFlow >= 0 ? "text-positive" : "text-negative"
+                }`}
+              >
+                {currency(s.totalCashFlow)}
+              </td>
+              <td className="px-4 py-3 text-right tabular-nums text-positive">
+                {currency(s.principalPaid)}
+              </td>
+              <td className="px-4 py-3 text-right tabular-nums">
+                {currency(s.currentBalance)}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </section>
+
+      <p className="text-xs text-muted">
+        Click a year to open its worksheet. Cash-flow totals cover years with
+        recorded figures. Principal paid and loan balance come from the amortization
+        schedule through today, so they stay accurate even for years you haven&apos;t
+        entered yet.
+      </p>
     </div>
   );
 }

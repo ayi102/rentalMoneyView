@@ -28,12 +28,6 @@ export default function RootLayout({
                 href="/"
                 className="rounded-md px-3 py-1.5 text-muted hover:bg-background hover:text-foreground"
               >
-                Dashboard
-              </Link>
-              <Link
-                href="/summary"
-                className="rounded-md px-3 py-1.5 text-muted hover:bg-background hover:text-foreground"
-              >
                 All Years
               </Link>
               <Link

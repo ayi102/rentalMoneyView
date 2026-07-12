@@ -4,7 +4,7 @@ import { currency, percent } from "@/lib/format";
 import { YearSelector } from "./year-selector";
 import {
   ExpenseBreakdownChart,
-  IncomeExpenseChart,
+  IncomeBreakdownChart,
 } from "./dashboard-charts";
 
 export const dynamic = "force-dynamic";
@@ -129,15 +129,13 @@ export default async function Dashboard({
         />
       </div>
 
-      {/* Charts */}
-      <div className="grid gap-4 lg:grid-cols-5">
-        <section className="rounded-xl border border-border bg-surface p-4 lg:col-span-3">
-          <h2 className="mb-3 text-sm font-semibold">
-            Monthly income vs. expense
-          </h2>
-          <IncomeExpenseChart data={data.monthly} />
+      {/* Breakdowns (totals by category) */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <section className="rounded-xl border border-border bg-surface p-4">
+          <h2 className="mb-3 text-sm font-semibold">Income by category</h2>
+          <IncomeBreakdownChart data={data.incomeByCategory} />
         </section>
-        <section className="rounded-xl border border-border bg-surface p-4 lg:col-span-2">
+        <section className="rounded-xl border border-border bg-surface p-4">
           <h2 className="mb-3 text-sm font-semibold">Where the money goes</h2>
           <ExpenseBreakdownChart data={data.expenseByCategory} />
         </section>

@@ -5,74 +5,38 @@ import {
   BarChart,
   Cell,
   CartesianGrid,
-  Legend,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
-import type { CategoryTotal, MonthlyPoint } from "@/lib/metrics";
+import type { CategoryTotal } from "@/lib/metrics";
 import { currency } from "@/lib/format";
 
-const INCOME = "#2f9e73";
-const EXPENSE = "#e07a54";
-const CAT_COLORS = [
-  "#1f6feb", "#e07a54", "#2f9e73", "#b06fd6", "#d9a441",
-  "#4bb3c4", "#d15a8a", "#6b7280", "#8bbf4d", "#c0564b",
+const INCOME_COLORS = ["#2f9e73", "#4bb3c4", "#8bbf4d", "#5a9bd4", "#b0c94d"];
+const EXPENSE_COLORS = [
+  "#e07a54", "#d15a8a", "#d9a441", "#b06fd6", "#c0564b",
+  "#1f6feb", "#4bb3c4", "#6b7280", "#8bbf4d", "#2f9e73",
 ];
 
 const axisStyle = { fontSize: 12, fill: "var(--muted)" };
 
-function money(v: number) {
-  return currency(v);
-}
-
-export function IncomeExpenseChart({ data }: { data: MonthlyPoint[] }) {
-  return (
-    <ResponsiveContainer width="100%" height={260}>
-      <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-        <XAxis dataKey="month" tick={axisStyle} axisLine={false} tickLine={false} />
-        <YAxis
-          tick={axisStyle}
-          axisLine={false}
-          tickLine={false}
-          width={54}
-          tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
-        />
-        <Tooltip
-          formatter={(v, name) => [
-            money(Number(v)),
-            name === "income" ? "Income" : "Expense",
-          ]}
-          contentStyle={{
-            background: "var(--surface)",
-            border: "1px solid var(--border)",
-            borderRadius: 8,
-            color: "var(--foreground)",
-          }}
-        />
-        <Legend
-          formatter={(v) => (v === "income" ? "Income" : "Expense")}
-          wrapperStyle={{ fontSize: 12 }}
-        />
-        <Bar dataKey="income" fill={INCOME} radius={[3, 3, 0, 0]} />
-        <Bar dataKey="expense" fill={EXPENSE} radius={[3, 3, 0, 0]} />
-      </BarChart>
-    </ResponsiveContainer>
-  );
-}
-
-export function ExpenseBreakdownChart({ data }: { data: CategoryTotal[] }) {
+function BreakdownChart({
+  data,
+  colors,
+  label,
+  empty,
+}: {
+  data: CategoryTotal[];
+  colors: string[];
+  label: string;
+  empty: string;
+}) {
   if (data.length === 0) {
-    return (
-      <p className="py-10 text-center text-sm text-muted">
-        No counted expenses yet for this year.
-      </p>
-    );
+    return <p className="py-10 text-center text-sm text-muted">{empty}</p>;
   }
   return (
-    <ResponsiveContainer width="100%" height={Math.max(180, data.length * 38)}>
+    <ResponsiveContainer width="100%" height={Math.max(160, data.length * 40)}>
       <BarChart
         data={data}
         layout="vertical"
@@ -95,7 +59,7 @@ export function ExpenseBreakdownChart({ data }: { data: CategoryTotal[] }) {
           width={150}
         />
         <Tooltip
-          formatter={(v) => [money(Number(v)), "Spent"]}
+          formatter={(v) => [currency(Number(v)), label]}
           contentStyle={{
             background: "var(--surface)",
             border: "1px solid var(--border)",
@@ -105,10 +69,32 @@ export function ExpenseBreakdownChart({ data }: { data: CategoryTotal[] }) {
         />
         <Bar dataKey="amount" radius={[0, 3, 3, 0]}>
           {data.map((_, i) => (
-            <Cell key={i} fill={CAT_COLORS[i % CAT_COLORS.length]} />
+            <Cell key={i} fill={colors[i % colors.length]} />
           ))}
         </Bar>
       </BarChart>
     </ResponsiveContainer>
+  );
+}
+
+export function IncomeBreakdownChart({ data }: { data: CategoryTotal[] }) {
+  return (
+    <BreakdownChart
+      data={data}
+      colors={INCOME_COLORS}
+      label="Received"
+      empty="No income recorded for this year."
+    />
+  );
+}
+
+export function ExpenseBreakdownChart({ data }: { data: CategoryTotal[] }) {
+  return (
+    <BreakdownChart
+      data={data}
+      colors={EXPENSE_COLORS}
+      label="Spent"
+      empty="No counted expenses for this year."
+    />
   );
 }

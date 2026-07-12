@@ -10,11 +10,6 @@ import {
 } from "@/lib/finance";
 import type { Property, Transaction } from "@prisma/client";
 
-export const MONTH_LABELS = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
-
 // Dates in this app are calendar dates (no time-of-day meaning), stored as UTC
 // midnight. All date math uses UTC getters/setters so a "2025-03-01" entry never
 // slips into February in a negative-offset timezone.
@@ -49,13 +44,6 @@ export interface CategoryTotal {
   amount: number;
 }
 
-export interface MonthlyPoint {
-  month: string;
-  income: number;
-  expense: number; // counted operating + capital
-  net: number;
-}
-
 export interface ExcludedItem {
   id: string;
   date: Date;
@@ -71,7 +59,7 @@ export interface YearData {
   availableYears: number[];
   metrics: PeriodMetrics;
   monthlyPayment: number;
-  monthly: MonthlyPoint[];
+  incomeByCategory: CategoryTotal[];
   expenseByCategory: CategoryTotal[];
   excluded: ExcludedItem[];
   transactionCount: number;
@@ -153,20 +141,16 @@ export async function getYearData(
     window,
   );
 
-  // Monthly series (counted entries only)
-  const monthly: MonthlyPoint[] = MONTH_LABELS.map((m) => ({
-    month: m,
-    income: 0,
-    expense: 0,
-    net: 0,
-  }));
+  // Income-by-category (counted). Data is annual, so we summarize by category
+  // rather than by month.
+  const incMap = new Map<string, number>();
   for (const t of txns) {
-    if (!t.countsTowardCost) continue;
-    const idx = t.date.getUTCMonth();
-    if (t.kind === "income") monthly[idx].income += t.amount;
-    else monthly[idx].expense += t.amount;
+    if (t.kind !== "income" || !t.countsTowardCost) continue;
+    incMap.set(t.category, (incMap.get(t.category) ?? 0) + t.amount);
   }
-  for (const p of monthly) p.net = p.income - p.expense;
+  const incomeByCategory = [...incMap.entries()]
+    .map(([category, amount]) => ({ category, amount }))
+    .sort((a, b) => b.amount - a.amount);
 
   // Expense-by-category (counted, non-capital)
   const catMap = new Map<string, number>();
@@ -196,7 +180,7 @@ export async function getYearData(
     availableYears: await getAvailableYears(property.id),
     metrics,
     monthlyPayment: property.loanTermYears ? monthlyPayment(loanTermsOf(property)) : 0,
-    monthly,
+    incomeByCategory,
     expenseByCategory,
     excluded,
     transactionCount: txns.length,

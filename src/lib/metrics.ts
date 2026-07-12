@@ -360,7 +360,9 @@ export interface PortfolioSummary {
   totalNoi: number;
   totalInterest: number;
   totalCashFlow: number;
-  netPosition: number; // totalCashFlow + principalPaid
+  initialInvestment: number; // down payment + points + closing
+  equityAtCost: number; // purchase price − current balance
+  netPosition: number; // equityAtCost + totalCashFlow − initialInvestment
   recordedYearCount: number;
 }
 
@@ -481,6 +483,18 @@ export async function getPortfolioSummary(
   const principalPaid = originalLoan - currentBalance;
   const pctPaid = originalLoan > 0 ? principalPaid / originalLoan : 0;
 
+  // Cash put in to acquire the property (down payment + points + closing costs).
+  const initialInvestment =
+    property.purchasePrice * (property.downPaymentPct ?? 0) +
+    (property.points ?? 0) +
+    (property.closingCosts ?? 0);
+  // Equity held today, valued at cost (no appreciation — that lives in Projection):
+  // purchase price minus what's still owed = your down payment + principal paid.
+  const equityAtCost = property.purchasePrice - currentBalance;
+  // Net position = what you'd hold if you sold at cost today, plus cash collected,
+  // minus everything you put in. This now includes the purchase costs.
+  const netPosition = equityAtCost + totalCashFlow - initialInvestment;
+
   return {
     property,
     hasLoan,
@@ -497,7 +511,9 @@ export async function getPortfolioSummary(
     totalNoi,
     totalInterest,
     totalCashFlow,
-    netPosition: totalCashFlow + principalPaid,
+    initialInvestment,
+    equityAtCost,
+    netPosition,
     recordedYearCount,
   };
 }

@@ -91,7 +91,7 @@ export default async function HomeAllYears() {
         <StatCard
           label="Net Position"
           value={currency(s.netPosition)}
-          sub="cash flow + principal (equity)"
+          sub={`equity + cash flow − ${currency(s.initialInvestment)} invested`}
           tone={s.netPosition >= 0 ? "positive" : "negative"}
         />
         <StatCard
@@ -217,10 +217,11 @@ export default async function HomeAllYears() {
       </section>
 
       <p className="text-xs text-muted">
-        Click a year to open its worksheet. Cash-flow totals cover years with
-        recorded figures. Principal paid and loan balance come from the amortization
-        schedule through today, so they stay accurate even for years you haven&apos;t
-        entered yet.
+        Click a year to open its worksheet. <strong>Net Position</strong> is your
+        equity at cost ({currency(s.equityAtCost)}) plus cash flow, minus the{" "}
+        {currency(s.initialInvestment)} you put in to buy (down payment + points +
+        closing) — so it reflects the purchase cost. It assumes no appreciation;
+        the Projection tab adds market value and shows NPV/IRR/MIRR.
       </p>
     </div>
   );

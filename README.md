@@ -42,6 +42,23 @@ npm run dev         # http://localhost:3000
   (run `npx tsx prisma/seed.local.ts`). `prisma/seed.ts` only contains the generic
   category list, so nothing sensitive is ever in version control.
 
+### Importing the existing spreadsheets
+
+`npm run import` reads the per-year `... (YYYY).xlsx` files and populates the database
+(replacing prior imported data). It reconciles each year against the sheet's own NOI
+and refuses to silently disagree. It runs entirely locally — nothing is uploaded, and
+no figures are hardcoded in the code; everything is read from your files at runtime.
+
+```bash
+# folder path comes from RENTAL_XLSX_DIR in .env (git-ignored), or pass it explicitly:
+npm run import
+npx tsx scripts/import-spreadsheets.ts "/path/to/xlsx/folder"
+```
+
+Model note: in the AOPD sheet, `Operating Expenses = SUM(categories) − Benefits`, where
+"Benefits" is credits/refunds (money in), so the importer records Benefits as income —
+which makes NOI, cash flow, and taxable income match the sheet exactly.
+
 ### Useful scripts
 
 ```bash

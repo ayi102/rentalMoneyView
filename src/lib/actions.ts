@@ -75,6 +75,21 @@ export async function saveWorksheet(
   revalidatePath("/projection");
 }
 
+/** Delete every entry (and mileage) for a property in a given year. */
+export async function deleteYear(propertyId: string, year: number) {
+  const range = {
+    gte: new Date(Date.UTC(year, 0, 1)),
+    lt: new Date(Date.UTC(year + 1, 0, 1)),
+  };
+  await prisma.$transaction([
+    prisma.transaction.deleteMany({ where: { propertyId, date: range } }),
+    prisma.mileageEntry.deleteMany({ where: { propertyId, date: range } }),
+  ]);
+  revalidatePath("/");
+  revalidatePath("/worksheet");
+  revalidatePath("/projection");
+}
+
 export interface AssumptionsInput {
   currentValue: number | null; // dollars; null => estimate from appreciation
   appreciationPct: number; // percent, e.g. 3 for 3%

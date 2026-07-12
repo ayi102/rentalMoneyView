@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { saveWorksheet, type WorksheetSaveItem } from "@/lib/actions";
+import { deleteYear, saveWorksheet, type WorksheetSaveItem } from "@/lib/actions";
 import { currency } from "@/lib/format";
 import type { WorksheetGroup } from "@/lib/metrics";
 
@@ -131,6 +131,26 @@ export function WorksheetForm({
     };
   }, [groups, constants]);
 
+  async function onDelete() {
+    const total = groups.reduce((n, g) => n + g.items.length, 0);
+    if (
+      !confirm(
+        `Delete all entries for ${year}? This removes ${total} line${
+          total === 1 ? "" : "s"
+        } and can't be undone.`,
+      )
+    )
+      return;
+    setPending(true);
+    try {
+      await deleteYear(propertyId, year);
+      router.push("/worksheet");
+      router.refresh();
+    } finally {
+      setPending(false);
+    }
+  }
+
   async function onSave() {
     setPending(true);
     try {
@@ -198,6 +218,13 @@ export function WorksheetForm({
           One line = a single value; “+ itemize” to break it out. Untick the dot to keep
           a line but leave it out of totals.
         </span>
+        <button
+          onClick={onDelete}
+          disabled={pending}
+          className="text-sm text-negative hover:underline disabled:opacity-50"
+        >
+          Delete {year}
+        </button>
       </div>
     </div>
   );

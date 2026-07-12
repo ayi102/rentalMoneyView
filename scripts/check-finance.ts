@@ -4,7 +4,10 @@ import {
   amortizationSchedule,
   annualDepreciation,
   computeMetrics,
+  irr,
+  mirr,
   monthlyPayment,
+  npv,
   type LedgerEntry,
 } from "../src/lib/finance";
 
@@ -53,6 +56,26 @@ const m = computeMetrics(
 check("Net Operating Income", m.netOperatingIncome, 17404.58, 0.1);
 check("Cash flow", m.cashFlow, -1748.52, 60);
 check("Taxable income", m.taxableIncome, -8440.37, 60);
+
+// 5. NPV / IRR / MIRR against known values
+// Your Projection sheet: NPV(13%, 30yr of $6000) - $50,000 initial = -5026.08
+check(
+  "NPV (your sheet)",
+  npv(0.13, [-50000, ...Array(30).fill(6000)]),
+  -5026.08,
+  0.1,
+);
+// Simple IRR: -100 now, +110 next year -> 10%
+check("IRR -100/+110", irr([-100, 110])! * 100, 10, 0.01);
+// Excel IRR example: -1000, then 500,500,500 -> 23.375%
+check("IRR -1000/500x3", irr([-1000, 500, 500, 500])! * 100, 23.375, 0.05);
+// Excel MIRR docs example: values, finance 10%, reinvest 12% -> 12.6094%
+check(
+  "MIRR (Excel example)",
+  mirr([-120000, 39000, 30000, 21000, 37000, 46000], 0.1, 0.12)! * 100,
+  12.6094,
+  0.01,
+);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

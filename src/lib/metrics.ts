@@ -1,9 +1,13 @@
 import { prisma } from "@/lib/prisma";
 import {
   amortizationSchedule,
+  annualDepreciation,
   computeMetrics,
+  irr,
   loanAmount,
+  mirr,
   monthlyPayment,
+  npv,
   type AmortizationRow,
   type LedgerEntry,
   type PeriodMetrics,
@@ -97,6 +101,116 @@ export async function getTransactionsForYear(
     },
     orderBy: { date: "desc" },
   });
+}
+
+// ---- Worksheet (editable per-year, AOPD-style category grid) ---------------
+
+export interface WorksheetRow {
+  kind: "income" | "expense";
+  category: string; // stored category (parent for subs)
+  subcategory: string | null;
+  label: string; // display label
+  amount: number; // current counted sum for the year
+  note: string;
+}
+
+export interface WorksheetData {
+  property: Property;
+  year: number;
+  availableYears: number[];
+  rows: WorksheetRow[];
+  // constants for live totals as the user types
+  mortgageInterest: number;
+  debtService: number;
+  depreciation: number;
+  monthlyPayment: number;
+}
+
+export async function getWorksheetData(
+  property: Property,
+  year: number,
+): Promise<WorksheetData> {
+  const [categories, txns] = await Promise.all([
+    prisma.category.findMany({ orderBy: { sortOrder: "asc" } }),
+    getTransactionsForYear(property.id, year),
+  ]);
+
+  // A category is a "container" if other categories name it as parent.
+  const parents = new Set(
+    categories.filter((c) => c.parent).map((c) => c.parent as string),
+  );
+
+  const keyOf = (kind: string, cat: string, sub: string | null) =>
+    `${kind}|${cat}|${sub ?? ""}`;
+
+  // Current counted sums + notes per (kind, category, subcategory).
+  const sums = new Map<string, number>();
+  const notes = new Map<string, string>();
+  for (const t of txns) {
+    if (!t.countsTowardCost) continue;
+    const k = keyOf(t.kind, t.category, t.subcategory);
+    sums.set(k, (sums.get(k) ?? 0) + t.amount);
+    if (t.description && !notes.get(k)) notes.set(k, t.description);
+  }
+
+  const rows: WorksheetRow[] = [];
+  const seen = new Set<string>();
+  const pushLeaf = (
+    kind: "income" | "expense",
+    category: string,
+    subcategory: string | null,
+  ) => {
+    const k = keyOf(kind, category, subcategory);
+    if (seen.has(k)) return;
+    seen.add(k);
+    rows.push({
+      kind,
+      category,
+      subcategory,
+      label: subcategory ? `${category} › ${subcategory}` : category,
+      amount: sums.get(k) ?? 0,
+      note: notes.get(k) ?? "",
+    });
+  };
+
+  // Leaves from the taxonomy, in sort order (income first, then expense).
+  for (const kind of ["income", "expense"] as const) {
+    for (const c of categories.filter((c) => c.kind === kind)) {
+      const isContainer = c.parent === null && parents.has(c.name);
+      if (isContainer) continue; // its children carry the amount
+      if (c.parent) pushLeaf(kind, c.parent, c.name);
+      else pushLeaf(kind, c.name, null);
+    }
+  }
+  // Any (category, subcategory) present in data but not in the taxonomy.
+  for (const t of txns) {
+    if (!t.countsTowardCost) continue;
+    pushLeaf(
+      t.kind === "income" ? "income" : "expense",
+      t.category,
+      t.subcategory,
+    );
+  }
+
+  const window = scheduleWindowForYear(property, year);
+  const mortgageInterest = window.reduce((s, r) => s + r.interest, 0);
+  const debtService = window.reduce((s, r) => s + r.payment, 0);
+
+  return {
+    property,
+    year,
+    availableYears: await getAvailableYears(property.id),
+    rows,
+    mortgageInterest,
+    debtService,
+    depreciation: annualDepreciation(
+      property.purchasePrice,
+      property.buildingValuePct,
+    ),
+    monthlyPayment: property.loanTermYears
+      ? monthlyPayment(loanTermsOf(property))
+      : 0,
+  };
 }
 
 /** Distinct calendar years that have transactions, newest first (always includes current year). */
@@ -359,5 +473,137 @@ export async function getPortfolioSummary(
     totalCashFlow,
     netPosition: totalCashFlow + principalPaid,
     recordedYearCount,
+  };
+}
+
+// ---- Projection: NPV / IRR / MIRR + value over time -----------------------
+
+export interface ValuePoint {
+  year: number;
+  value: number; // estimated market value (appreciated)
+  balance: number; // loan balance
+  equity: number; // value - balance
+}
+
+export interface Projection {
+  property: Property;
+  // assumptions (echoed back for the editable form)
+  currentValue: number;
+  isEstimatedValue: boolean;
+  appreciationRate: number;
+  discountRate: number;
+  sellingCostRate: number;
+  reinvestRate: number;
+  financeRate: number;
+  // inputs to the return calc
+  initialInvestment: number;
+  yearsHeld: number;
+  purchaseYear: number;
+  currentBalance: number;
+  sellingCosts: number;
+  terminalEquity: number; // net proceeds if sold today
+  totalCashFlow: number;
+  totalProfitIfSold: number; // terminalEquity + Σcashflow - initialInvestment
+  flows: number[];
+  cashFlowByYear: { year: number; cashFlow: number }[];
+  // results
+  npv: number;
+  irr: number | null;
+  mirr: number | null;
+  valueOverTime: ValuePoint[];
+}
+
+export async function getProjection(property: Property): Promise<Projection> {
+  const summary = await getPortfolioSummary(property);
+
+  const purchaseYear =
+    property.purchaseDate?.getUTCFullYear() ?? new Date().getUTCFullYear();
+  const currentYear = new Date().getUTCFullYear();
+  const yearsHeld = Math.max(1, currentYear - purchaseYear);
+
+  const appreciationRate = property.appreciationRate;
+  const discountRate = property.discountRate;
+  const sellingCostRate = property.sellingCostRate;
+  const reinvestRate = property.reinvestRate;
+  const financeRate = property.loanRate ?? discountRate;
+
+  // Current value: explicit override, else purchase price appreciated.
+  const estimatedValue =
+    property.purchasePrice * Math.pow(1 + appreciationRate, yearsHeld);
+  const currentValue = property.currentValue ?? estimatedValue;
+  const isEstimatedValue = property.currentValue == null;
+
+  const initialInvestment =
+    property.purchasePrice * (property.downPaymentPct ?? 0) +
+    (property.points ?? 0) +
+    (property.closingCosts ?? 0);
+
+  const currentBalance = summary.currentBalance;
+  const sellingCosts = currentValue * sellingCostRate;
+  const terminalEquity = currentValue - currentBalance - sellingCosts;
+
+  // Per-year operating cash flows (recorded years; 0 if a year has none).
+  const cashFlowByYear = summary.years
+    .filter((y) => y.year <= currentYear)
+    .map((y) => ({ year: y.year, cashFlow: y.cashFlow ?? 0 }));
+  const totalCashFlow = cashFlowByYear.reduce((s, y) => s + y.cashFlow, 0);
+
+  // Flow series: t0 = -initial investment, then each year's cash flow,
+  // with the terminal (sale-today) proceeds added to the final year.
+  const flows: number[] = [-initialInvestment];
+  cashFlowByYear.forEach((y, i) => {
+    flows.push(y.cashFlow + (i === cashFlowByYear.length - 1 ? terminalEquity : 0));
+  });
+
+  const totalProfitIfSold = terminalEquity + totalCashFlow - initialInvestment;
+
+  // Value over time across the loan term (illustrative, driven by appreciation).
+  const term = property.loanTermYears ?? 30;
+  const dated = (property.loanTermYears && property.purchaseDate
+    ? amortizationSchedule(loanTermsOf(property))
+    : []
+  ).map((row) => ({
+    ...row,
+    date: property.purchaseDate
+      ? addMonths(addMonths(property.purchaseDate, 1), row.paymentNumber - 1)
+      : new Date(0),
+  }));
+  const originalLoan = summary.originalLoan;
+  const balanceAtYearEnd = (y: number): number => {
+    if (dated.length === 0) return 0;
+    const paid = dated.filter((r) => r.date.getUTCFullYear() <= y);
+    return paid.length ? paid[paid.length - 1].balance : originalLoan;
+  };
+  const valueOverTime: ValuePoint[] = [];
+  for (let t = 0; t <= term; t++) {
+    const y = purchaseYear + t;
+    const value = property.purchasePrice * Math.pow(1 + appreciationRate, t);
+    const balance = balanceAtYearEnd(y);
+    valueOverTime.push({ year: y, value, balance, equity: value - balance });
+  }
+
+  return {
+    property,
+    currentValue,
+    isEstimatedValue,
+    appreciationRate,
+    discountRate,
+    sellingCostRate,
+    reinvestRate,
+    financeRate,
+    initialInvestment,
+    yearsHeld,
+    purchaseYear,
+    currentBalance,
+    sellingCosts,
+    terminalEquity,
+    totalCashFlow,
+    totalProfitIfSold,
+    flows,
+    cashFlowByYear,
+    npv: npv(discountRate, flows),
+    irr: irr(flows),
+    mirr: mirr(flows, financeRate, reinvestRate),
+    valueOverTime,
   };
 }

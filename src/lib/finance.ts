@@ -175,3 +175,76 @@ export function computeMetrics(
     cashOnCashReturn,
   };
 }
+
+// ---- Discounted-return metrics (NPV / IRR / MIRR) -------------------------
+//
+// All take a `flows` array indexed by period t = 0, 1, 2, …, where flows[0] is
+// the time-zero cash flow (typically the negative initial investment) and the
+// final element usually bundles the terminal value (e.g. net sale proceeds).
+
+/** Net present value at `rate`, discounting flows[t] by (1+rate)^t (t starts at 0). */
+export function npv(rate: number, flows: number[]): number {
+  return flows.reduce((sum, cf, t) => sum + cf / Math.pow(1 + rate, t), 0);
+}
+
+/**
+ * Internal rate of return: the `rate` where npv(rate, flows) === 0.
+ * Robust bracket + bisection (no dependence on a good initial guess).
+ * Returns null if there's no sign change (no computable IRR).
+ */
+export function irr(flows: number[]): number | null {
+  const hasPos = flows.some((f) => f > 0);
+  const hasNeg = flows.some((f) => f < 0);
+  if (!hasPos || !hasNeg) return null;
+
+  const f = (r: number) => npv(r, flows);
+  let lo = -0.9999; // rate can't be <= -100%
+  let hi = 1.0; // 100% to start; expand if needed
+  let flo = f(lo);
+  let fhi = f(hi);
+  // expand the upper bound until we bracket a root (cap the search)
+  let expand = 0;
+  while (flo * fhi > 0 && hi < 1e6 && expand < 200) {
+    hi *= 2;
+    fhi = f(hi);
+    expand++;
+  }
+  if (flo * fhi > 0) return null; // couldn't bracket
+
+  for (let i = 0; i < 200; i++) {
+    const mid = (lo + hi) / 2;
+    const fmid = f(mid);
+    if (Math.abs(fmid) < 1e-7) return mid;
+    if (flo * fmid < 0) {
+      hi = mid;
+      fhi = fmid;
+    } else {
+      lo = mid;
+      flo = fmid;
+    }
+  }
+  return (lo + hi) / 2;
+}
+
+/**
+ * Modified IRR. Negative flows are financed at `financeRate`; positive flows are
+ * reinvested at `reinvestRate` (Excel's MIRR convention). n = number of periods
+ * (intervals) = flows.length - 1.
+ */
+export function mirr(
+  flows: number[],
+  financeRate: number,
+  reinvestRate: number,
+): number | null {
+  const n = flows.length - 1;
+  if (n <= 0) return null;
+  let pvNeg = 0; // present value of outflows (at t=0)
+  let fvPos = 0; // future value of inflows (at t=n)
+  for (let t = 0; t < flows.length; t++) {
+    const cf = flows[t];
+    if (cf < 0) pvNeg += cf / Math.pow(1 + financeRate, t);
+    else if (cf > 0) fvPos += cf * Math.pow(1 + reinvestRate, n - t);
+  }
+  if (pvNeg === 0 || fvPos === 0) return null;
+  return Math.pow(-fvPos / pvNeg, 1 / n) - 1;
+}

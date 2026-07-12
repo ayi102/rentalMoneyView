@@ -37,6 +37,13 @@ model Property {
   // Income
   monthlyRent   Float @default(0)
 
+  // Projection / return assumptions (editable in the app)
+  currentValue      Float? // today's market value; if null, estimated from appreciation
+  appreciationRate  Float @default(0.03) // annual property appreciation
+  discountRate      Float @default(0.13) // for NPV (matches the old Projection sheet)
+  sellingCostRate   Float @default(0.06) // costs to sell (commission etc.)
+  reinvestRate      Float @default(0.08) // MIRR reinvestment rate for positive cash flows
+
   transactions  Transaction[]
   mileage       MileageEntry[]
 

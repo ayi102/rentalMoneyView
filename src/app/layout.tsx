@@ -37,6 +37,18 @@ export default function RootLayout({
                 All Years
               </Link>
               <Link
+                href="/worksheet"
+                className="rounded-md px-3 py-1.5 text-muted hover:bg-background hover:text-foreground"
+              >
+                Worksheet
+              </Link>
+              <Link
+                href="/projection"
+                className="rounded-md px-3 py-1.5 text-muted hover:bg-background hover:text-foreground"
+              >
+                Projection
+              </Link>
+              <Link
                 href="/ledger"
                 className="rounded-md px-3 py-1.5 text-muted hover:bg-background hover:text-foreground"
               >

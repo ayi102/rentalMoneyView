@@ -50,9 +50,9 @@ export default async function Dashboard({
       <div className="rounded-xl border border-border bg-surface p-8 text-center">
         <h1 className="text-lg font-semibold">No property yet</h1>
         <p className="mt-2 text-sm text-muted">
-          Run the local seed, or add transactions from the{" "}
-          <Link href="/ledger" className="text-accent underline">
-            ledger
+          Run the local seed, or enter figures in the{" "}
+          <Link href="/worksheet" className="text-accent underline">
+            worksheet
           </Link>
           .
         </p>

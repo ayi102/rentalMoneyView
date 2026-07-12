@@ -48,12 +48,6 @@ export default function RootLayout({
               >
                 Projection
               </Link>
-              <Link
-                href="/ledger"
-                className="rounded-md px-3 py-1.5 text-muted hover:bg-background hover:text-foreground"
-              >
-                Ledger
-              </Link>
             </nav>
           </div>
         </header>

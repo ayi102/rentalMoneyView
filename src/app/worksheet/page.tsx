@@ -40,7 +40,8 @@ export default async function WorksheetPage({
         key={year}
         propertyId={property.id}
         year={year}
-        rows={data.rows}
+        groups={data.groups}
+        excluded={data.excluded}
         constants={{
           mortgageInterest: data.mortgageInterest,
           debtService: data.debtService,

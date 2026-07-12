@@ -3,23 +3,25 @@
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 
-export interface WorksheetInput {
+export interface WorksheetSaveItem {
   kind: "income" | "expense";
   category: string;
   subcategory: string | null;
   amount: number;
-  note: string;
+  description: string;
+  countsTowardCost: boolean;
 }
 
 /**
- * Save an entire year's worksheet. Rewrites the year's COUNTED transactions from
- * the grid (one per non-zero row); excluded items (countsTowardCost=false) are
- * left untouched. Amounts are booked at a representative mid-year date.
+ * Save an entire year's worksheet. This is the single source of truth for the
+ * year: it deletes ALL of that year's entries and recreates them from `items`
+ * (both counted line items and excluded items). Each item is one transaction,
+ * so itemizing within a category is preserved. Booked at a mid-year date.
  */
 export async function saveWorksheet(
   propertyId: string,
   year: number,
-  rows: WorksheetInput[],
+  items: WorksheetSaveItem[],
 ) {
   const property = await prisma.property.findUnique({
     where: { id: propertyId },
@@ -39,18 +41,16 @@ export async function saveWorksheet(
   }
 
   await prisma.$transaction([
-    // remove existing counted rows for this year (keep excluded ones)
     prisma.transaction.deleteMany({
       where: {
         propertyId,
-        countsTowardCost: true,
         date: {
           gte: new Date(Date.UTC(year, 0, 1)),
           lt: new Date(Date.UTC(year + 1, 0, 1)),
         },
       },
     }),
-    ...rows
+    ...items
       .filter((r) => Number.isFinite(r.amount) && Math.abs(r.amount) > 0)
       .map((r) =>
         prisma.transaction.create({
@@ -61,9 +61,9 @@ export async function saveWorksheet(
             category: r.category,
             subcategory: r.subcategory || null,
             amount: Math.abs(r.amount),
-            description: r.note?.trim() || null,
-            countsTowardCost: true,
-            taxDeductible: r.kind === "expense",
+            description: r.description?.trim() || null,
+            countsTowardCost: r.countsTowardCost,
+            taxDeductible: r.countsTowardCost && r.kind === "expense",
             isCapital: false,
           },
         }),
@@ -73,77 +73,7 @@ export async function saveWorksheet(
   revalidatePath("/");
   revalidatePath("/summary");
   revalidatePath("/worksheet");
-  revalidatePath("/ledger");
-}
-
-function parseFlags(fd: FormData) {
-  return {
-    countsTowardCost: fd.get("countsTowardCost") === "on",
-    taxDeductible: fd.get("taxDeductible") === "on",
-    isCapital: fd.get("isCapital") === "on",
-  };
-}
-
-function baseFields(fd: FormData) {
-  const kind = String(fd.get("kind") || "expense");
-  const category = String(fd.get("category") || "").trim();
-  const subRaw = String(fd.get("subcategory") || "").trim();
-  const amount = Math.abs(Number(fd.get("amount")));
-  const dateStr = String(fd.get("date") || "");
-  const description = String(fd.get("description") || "").trim();
-  return {
-    kind: kind === "income" ? "income" : "expense",
-    category,
-    subcategory: subRaw || null,
-    amount: Number.isFinite(amount) ? amount : 0,
-    date: dateStr ? new Date(dateStr) : new Date(),
-    description: description || null,
-  };
-}
-
-export async function createTransaction(fd: FormData) {
-  const propertyId = String(fd.get("propertyId") || "");
-  if (!propertyId) throw new Error("Missing propertyId");
-  const base = baseFields(fd);
-  if (!base.category || base.amount <= 0) return; // ignore incomplete rows
-  await prisma.transaction.create({
-    data: { propertyId, ...base, ...parseFlags(fd) },
-  });
-  revalidatePath("/");
-  revalidatePath("/ledger");
-}
-
-export async function updateTransaction(fd: FormData) {
-  const id = String(fd.get("id") || "");
-  if (!id) throw new Error("Missing id");
-  const base = baseFields(fd);
-  await prisma.transaction.update({
-    where: { id },
-    data: { ...base, ...parseFlags(fd) },
-  });
-  revalidatePath("/");
-  revalidatePath("/ledger");
-}
-
-/** Flip a single boolean flag inline from the ledger. */
-export async function toggleTransactionFlag(
-  id: string,
-  flag: "countsTowardCost" | "taxDeductible" | "isCapital",
-) {
-  const t = await prisma.transaction.findUnique({ where: { id } });
-  if (!t) return;
-  await prisma.transaction.update({
-    where: { id },
-    data: { [flag]: !t[flag] },
-  });
-  revalidatePath("/");
-  revalidatePath("/ledger");
-}
-
-export async function deleteTransaction(id: string) {
-  await prisma.transaction.delete({ where: { id } });
-  revalidatePath("/");
-  revalidatePath("/ledger");
+  revalidatePath("/projection");
 }
 
 export interface AssumptionsInput {

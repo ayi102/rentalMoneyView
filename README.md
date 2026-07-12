@@ -7,16 +7,17 @@ log every dollar in and out, but decide per entry what actually counts.
 ## What it does
 
 - **Dashboard** — cash flow, net operating income, cap rate, cash-on-cash return,
-  equity/mortgage, depreciation and taxable income, plus monthly income-vs-expense
-  and expense-by-category charts, for any year.
-- **Ledger** — add/edit/delete income & expense entries with a category taxonomy.
-- **Three per-entry flags** (the heart of the app):
-  - **Counts toward cost** — log something for your records but exclude it from real
-    cost/profit (the "truth vs. what actually counts" distinction).
-  - **Tax deductible** — for the tax view.
-  - **Capital vs. operating** — capex is separated from operating expenses.
-- The dashboard's "Tracked but not counted" panel shows exactly what you excluded
-  and what your cash flow would be if it counted.
+  depreciation and taxable income, plus income- and expense-by-category totals, for
+  any year.
+- **All Years** — cumulative cash flow, principal paid / equity built, loan paydown,
+  and a per-year table.
+- **Worksheet** — the editable, AOPD-style per-year grid: one row per category, with
+  live NOI / cash flow / taxable totals. Each category can be a single value **or**
+  broken into line items that roll up. A "tracked but not counted" section holds
+  items you keep for the record but exclude from totals. This is the source of truth
+  for a year's figures.
+- **Projection** — NPV, IRR, and MIRR from your actual cash flows, plus a
+  value/loan/equity-over-time chart, with editable assumptions.
 
 ## Tech
 

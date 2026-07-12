@@ -105,20 +105,35 @@ export async function getTransactionsForYear(
 
 // ---- Worksheet (editable per-year, AOPD-style category grid) ---------------
 
-export interface WorksheetRow {
+export interface WorksheetItem {
+  description: string;
+  amount: number;
+}
+
+// One category (or subcategory) with its line items. Total = sum of items.
+// A single lump value is just one item; itemizing adds more.
+export interface WorksheetGroup {
   kind: "income" | "expense";
-  category: string; // stored category (parent for subs)
+  category: string; // stored category (parent name for subs)
   subcategory: string | null;
   label: string; // display label
-  amount: number; // current counted sum for the year
-  note: string;
+  items: WorksheetItem[];
+}
+
+export interface WorksheetExcluded {
+  kind: "income" | "expense";
+  category: string;
+  subcategory: string | null;
+  description: string;
+  amount: number;
 }
 
 export interface WorksheetData {
   property: Property;
   year: number;
   availableYears: number[];
-  rows: WorksheetRow[];
+  groups: WorksheetGroup[];
+  excluded: WorksheetExcluded[];
   // constants for live totals as the user types
   mortgageInterest: number;
   debtService: number;
@@ -143,19 +158,19 @@ export async function getWorksheetData(
   const keyOf = (kind: string, cat: string, sub: string | null) =>
     `${kind}|${cat}|${sub ?? ""}`;
 
-  // Current counted sums + notes per (kind, category, subcategory).
-  const sums = new Map<string, number>();
-  const notes = new Map<string, string>();
+  // Counted transactions grouped into line items per (kind, category, sub).
+  const itemsByKey = new Map<string, WorksheetItem[]>();
   for (const t of txns) {
     if (!t.countsTowardCost) continue;
     const k = keyOf(t.kind, t.category, t.subcategory);
-    sums.set(k, (sums.get(k) ?? 0) + t.amount);
-    if (t.description && !notes.get(k)) notes.set(k, t.description);
+    const arr = itemsByKey.get(k) ?? [];
+    arr.push({ description: t.description ?? "", amount: t.amount });
+    itemsByKey.set(k, arr);
   }
 
-  const rows: WorksheetRow[] = [];
+  const groups: WorksheetGroup[] = [];
   const seen = new Set<string>();
-  const pushLeaf = (
+  const pushGroup = (
     kind: "income" | "expense",
     category: string,
     subcategory: string | null,
@@ -163,34 +178,44 @@ export async function getWorksheetData(
     const k = keyOf(kind, category, subcategory);
     if (seen.has(k)) return;
     seen.add(k);
-    rows.push({
+    groups.push({
       kind,
       category,
       subcategory,
       label: subcategory ? `${category} › ${subcategory}` : category,
-      amount: sums.get(k) ?? 0,
-      note: notes.get(k) ?? "",
+      items: itemsByKey.get(k) ?? [],
     });
   };
 
-  // Leaves from the taxonomy, in sort order (income first, then expense).
+  // Leaf categories from the taxonomy, in sort order (income first).
   for (const kind of ["income", "expense"] as const) {
     for (const c of categories.filter((c) => c.kind === kind)) {
       const isContainer = c.parent === null && parents.has(c.name);
       if (isContainer) continue; // its children carry the amount
-      if (c.parent) pushLeaf(kind, c.parent, c.name);
-      else pushLeaf(kind, c.name, null);
+      if (c.parent) pushGroup(kind, c.parent, c.name);
+      else pushGroup(kind, c.name, null);
     }
   }
-  // Any (category, subcategory) present in data but not in the taxonomy.
+  // Any counted (category, subcategory) present in data but not the taxonomy.
   for (const t of txns) {
     if (!t.countsTowardCost) continue;
-    pushLeaf(
+    pushGroup(
       t.kind === "income" ? "income" : "expense",
       t.category,
       t.subcategory,
     );
   }
+
+  // Excluded (tracked but not counted) items — a free list.
+  const excluded: WorksheetExcluded[] = txns
+    .filter((t) => !t.countsTowardCost)
+    .map((t) => ({
+      kind: t.kind === "income" ? "income" : "expense",
+      category: t.category,
+      subcategory: t.subcategory,
+      description: t.description ?? "",
+      amount: t.amount,
+    }));
 
   const window = scheduleWindowForYear(property, year);
   const mortgageInterest = window.reduce((s, r) => s + r.interest, 0);
@@ -200,7 +225,8 @@ export async function getWorksheetData(
     property,
     year,
     availableYears: await getAvailableYears(property.id),
-    rows,
+    groups,
+    excluded,
     mortgageInterest,
     debtService,
     depreciation: annualDepreciation(

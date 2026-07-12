@@ -1,0 +1,100 @@
+// rentalMoneyView data model.
+// SQLite for local-first use; the same schema works on Postgres later (Vercel) by
+// changing only the datasource provider/url.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// A rental property. Built to support multiple properties later.
+model Property {
+  id            String   @id @default(cuid())
+  name          String
+  address       String?
+
+  // Acquisition / basis
+  purchasePrice Float // total cost of the property
+  purchaseDate  DateTime?
+  squareFeet    Float?
+  yearBuilt     Int?
+
+  // Depreciable fraction of the purchase price (building value, land excluded).
+  // e.g. 0.86 => 86% of purchase price is depreciated straight-line over 27.5 years.
+  buildingValuePct Float @default(0.8)
+
+  // Loan terms (used to compute the amortization schedule & monthly payment)
+  loanRate        Float? // annual interest rate as a decimal, e.g. 0.05
+  loanTermYears   Int? // e.g. 30
+  downPaymentPct  Float? // decimal, e.g. 0.2
+  points          Float? // dollars
+  closingCosts    Float? // dollars
+
+  // Income
+  monthlyRent   Float @default(0)
+
+  transactions  Transaction[]
+  mileage       MileageEntry[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// The core ledger. Every dollar in or out is one row.
+// The three flags are the heart of the app: log EVERYTHING (the "truth"),
+// but control what actually counts toward real cost / profit / taxes.
+model Transaction {
+  id          String   @id @default(cuid())
+  propertyId  String
+  property    Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  date        DateTime
+  kind        String // "income" | "expense"
+  category    String // e.g. "Utilities", "Insurance", "Rent"
+  subcategory String? // e.g. "Electricity", "Flood"
+  amount      Float // always stored positive; `kind` gives direction
+  description String?
+
+  // --- The flags ---
+  countsTowardCost Boolean @default(true) // false = tracked but excluded from real cost/profit
+  taxDeductible    Boolean @default(true) // for the tax view
+  isCapital        Boolean @default(false) // capital expenditure vs. operating expense
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([propertyId, date])
+  @@index([propertyId, kind])
+}
+
+// Mileage log (Travel tab) — valued at the IRS standard mileage rate for deductions.
+model MileageEntry {
+  id          String   @id @default(cuid())
+  propertyId  String
+  property    Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  date        DateTime
+  source      String?
+  destination String?
+  reason      String?
+  miles       Float
+
+  createdAt   DateTime @default(now())
+
+  @@index([propertyId, date])
+}
+
+// Predefined category taxonomy for the ledger UI (income & expense).
+model Category {
+  id        String  @id @default(cuid())
+  kind      String // "income" | "expense"
+  name      String
+  parent    String? // parent category name for subcategories (e.g. "Utilities")
+  sortOrder Int     @default(0)
+
+  @@unique([kind, name, parent])
+}

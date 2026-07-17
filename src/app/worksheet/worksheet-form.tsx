@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { deleteYear, saveWorksheet, type WorksheetSaveItem } from "@/lib/actions";
 import { currency } from "@/lib/format";
-import type { WorksheetGroup } from "@/lib/metrics";
+import type { WorksheetGroup, WorksheetItem } from "@/lib/metrics";
 
 interface Constants {
   mortgageInterest: number;
@@ -35,11 +35,13 @@ export function WorksheetForm({
   propertyId,
   year,
   groups: initialGroups,
+  capital: initialCapital,
   constants,
 }: {
   propertyId: string;
   year: number;
   groups: WorksheetGroup[];
+  capital: WorksheetItem[];
   constants: Constants;
 }) {
   const router = useRouter();
@@ -55,6 +57,14 @@ export function WorksheetForm({
         amount: it.amount ? String(it.amount) : "",
         tracked: it.tracked,
       })),
+    })),
+  );
+  const [capital, setCapital] = useState<Item[]>(() =>
+    initialCapital.map((it) => ({
+      key: nextId(),
+      description: it.description,
+      amount: it.amount ? String(it.amount) : "",
+      tracked: it.tracked,
     })),
   );
   const [pending, setPending] = useState(false);
@@ -112,6 +122,23 @@ export function WorksheetForm({
     touch();
   }
 
+  // Capital additions (their own section)
+  function patchCap(i: number, patch: Partial<Item>) {
+    setCapital((cs) => cs.map((c, j) => (j === i ? { ...c, ...patch } : c)));
+    touch();
+  }
+  function addCap() {
+    setCapital((cs) => [
+      ...cs,
+      { key: nextId(), description: "", amount: "", tracked: true },
+    ]);
+    touch();
+  }
+  function removeCap(i: number) {
+    setCapital((cs) => cs.filter((_, j) => j !== i));
+    touch();
+  }
+
   const totals = useMemo(() => {
     const sec = (kind: "income" | "expense") => {
       let counted = 0;
@@ -125,16 +152,19 @@ export function WorksheetForm({
     };
     const income = sec("income");
     const expense = sec("expense");
+    const capitalTotal = trackedSum(capital);
     const noi = income.counted - expense.counted;
     return {
       income,
       expense,
-      untracked: income.uncounted + expense.uncounted,
+      capital: capitalTotal,
+      untracked:
+        income.uncounted + expense.uncounted + untrackedSum(capital),
       noi,
-      cashFlow: noi - constants.debtService,
+      cashFlow: noi - constants.debtService - capitalTotal,
       taxable: noi - constants.mortgageInterest - constants.depreciation,
     };
-  }, [groups, constants]);
+  }, [groups, capital, constants]);
 
   async function doDelete() {
     setPending(true);
@@ -166,6 +196,19 @@ export function WorksheetForm({
           });
         }
       }
+      for (const c of capital) {
+        const amt = parseFloat(c.amount) || 0;
+        if (amt === 0) continue;
+        items.push({
+          kind: "expense",
+          category: "Capital Additions",
+          subcategory: null,
+          amount: amt,
+          description: c.description,
+          countsTowardCost: c.tracked,
+          isCapital: true,
+        });
+      }
       await saveWorksheet(propertyId, year, items);
       setDirty(false);
       setSaved(true);
@@ -189,10 +232,52 @@ export function WorksheetForm({
         {renderSection("Expenses", expenseGroups, totals.expense)}
       </div>
 
+      {/* Capital additions (appliances, improvements) — reduce cash flow, not NOI */}
+      <div className="rounded-xl border border-border bg-surface">
+        <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+          <h2 className="text-sm font-semibold">
+            Capital additions
+            <span className="ml-2 font-normal text-muted">
+              (appliances, improvements — reduce cash flow, not NOI)
+            </span>
+          </h2>
+          <span className="text-sm font-semibold tabular-nums">
+            {currency(totals.capital, { cents: true })}
+          </span>
+        </div>
+        <div className="space-y-1 px-4 py-2">
+          {capital.length === 0 && (
+            <p className="text-sm text-muted">None this year.</p>
+          )}
+          {capital.map((c, i) => (
+            <ItemRow
+              key={c.key}
+              item={c}
+              onAmount={(v) => patchCap(i, { amount: v })}
+              onDesc={(v) => patchCap(i, { description: v })}
+              onToggle={() => patchCap(i, { tracked: !c.tracked })}
+              onRemove={() => removeCap(i)}
+              canRemove
+            />
+          ))}
+          <button
+            onClick={addCap}
+            className="mt-1 text-xs text-accent hover:underline"
+          >
+            + add capital item
+          </button>
+        </div>
+      </div>
+
       {/* Live computed totals */}
       <div className="grid grid-cols-2 gap-3 rounded-xl border border-border bg-surface p-4 md:grid-cols-4">
         <Stat label="Net Operating Income" value={totals.noi} />
-        <Stat label="Cash Flow" value={totals.cashFlow} hint="after mortgage" sign />
+        <Stat
+          label="Cash Flow"
+          value={totals.cashFlow}
+          hint="after mortgage & capital"
+          sign
+        />
         <Stat label="Taxable Income" value={totals.taxable} sign />
         <Stat
           label="Not tracked"

@@ -127,6 +127,7 @@ export interface WorksheetData {
   year: number;
   availableYears: number[];
   groups: WorksheetGroup[];
+  capital: WorksheetItem[]; // capital additions (isCapital), their own section
   // constants for live totals as the user types
   mortgageInterest: number;
   debtService: number;
@@ -151,10 +152,18 @@ export async function getWorksheetData(
   const keyOf = (kind: string, cat: string, sub: string | null) =>
     `${kind}|${cat}|${sub ?? ""}`;
 
-  // All transactions grouped into line items per (kind, category, sub).
-  // Untracked (countsTowardCost=false) items are included with tracked=false.
+  // Capital additions get their own section; everything else groups by category.
+  const capital: WorksheetItem[] = [];
   const itemsByKey = new Map<string, WorksheetItem[]>();
   for (const t of txns) {
+    if (t.isCapital) {
+      capital.push({
+        description: t.description ?? "",
+        amount: t.amount,
+        tracked: t.countsTowardCost,
+      });
+      continue;
+    }
     const k = keyOf(t.kind, t.category, t.subcategory);
     const arr = itemsByKey.get(k) ?? [];
     arr.push({
@@ -195,6 +204,7 @@ export async function getWorksheetData(
   }
   // Any (category, subcategory) present in data but not the taxonomy.
   for (const t of txns) {
+    if (t.isCapital) continue;
     pushGroup(
       t.kind === "income" ? "income" : "expense",
       t.category,
@@ -225,6 +235,7 @@ export async function getWorksheetData(
     year,
     availableYears: await getAvailableYears(property.id),
     groups,
+    capital,
     mortgageInterest,
     debtService,
     depreciation: annualDepreciation(

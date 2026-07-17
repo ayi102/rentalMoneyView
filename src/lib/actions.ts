@@ -10,6 +10,7 @@ export interface WorksheetSaveItem {
   amount: number;
   description: string;
   countsTowardCost: boolean;
+  isCapital?: boolean;
 }
 
 /**
@@ -63,8 +64,9 @@ export async function saveWorksheet(
             amount: Math.abs(r.amount),
             description: r.description?.trim() || null,
             countsTowardCost: r.countsTowardCost,
-            taxDeductible: r.countsTowardCost && r.kind === "expense",
-            isCapital: false,
+            taxDeductible:
+              r.countsTowardCost && r.kind === "expense" && !r.isCapital,
+            isCapital: r.isCapital ?? false,
           },
         }),
       ),

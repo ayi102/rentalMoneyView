@@ -141,7 +141,9 @@ export function computeMetrics(
   const mortgagePrincipal = scheduleWindow.reduce((s, r) => s + r.principal, 0);
   const annualDebtService = mortgageInterest + mortgagePrincipal;
 
-  const cashFlow = netOperatingIncome - annualDebtService;
+  // Cash flow subtracts capital additions too (matches the AOPD sheet):
+  // NOI − debt service − capital. Capital does not affect NOI or cap rate.
+  const cashFlow = netOperatingIncome - annualDebtService - capitalExpenses;
 
   const depreciation =
     (annualDepreciation(property.purchasePrice, property.buildingValuePct) *

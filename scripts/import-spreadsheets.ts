@@ -135,6 +135,26 @@ function parseYear(
   const aopdNOI =
     at((l) => /^Total: Net Operating Income/i.test(l))?.value ?? null;
 
+  // Capital additions live in the "Cash Flow Before Taxes" block, where labels and
+  // values are misaligned in this template. Locate the block by its accounting
+  // identity instead: NOI − debt service − capital = total cash flow. The block is
+  // 5 consecutive value cells [NOI, debtService, capital, amortization, total].
+  let capital = 0;
+  if (aopdNOI != null) {
+    for (let i = 0; i + 4 < rows.length; i++) {
+      const noi = rows[i].value;
+      const ds = rows[i + 1].value;
+      const cap = rows[i + 2].value;
+      const total = rows[i + 4].value;
+      if (noi == null || ds == null || total == null) continue;
+      if (Math.abs(noi - aopdNOI) > 0.5) continue; // this row is the cash-flow NOI
+      if (Math.abs(noi - ds - (cap ?? 0) - total) < 0.5) {
+        capital = cap ?? 0;
+        break;
+      }
+    }
+  }
+
   // Aggregate date: mid-year, but never before the month after purchase.
   let agg = ymd(year, 7);
   if (purchaseDate && purchaseDate.getTime() > agg.getTime()) {
@@ -142,6 +162,21 @@ function parseYear(
   }
 
   const entries: Entry[] = [];
+
+  // ---- Capital additions (reduce cash flow, not NOI) ----
+  if (capital > 0) {
+    entries.push({
+      date: agg,
+      kind: "expense",
+      category: "Capital Additions",
+      subcategory: null,
+      amount: capital,
+      description: "Capital addition (from AOPD)",
+      countsTowardCost: true,
+      taxDeductible: false,
+      isCapital: true,
+    });
+  }
 
   // ---- Income: rent (split monthly), other income ----
   const months =

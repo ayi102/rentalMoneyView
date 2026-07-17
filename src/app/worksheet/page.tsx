@@ -97,6 +97,7 @@ export default async function WorksheetPage({
         propertyId={property.id}
         year={year}
         groups={data.groups}
+        capital={data.capital}
         constants={{
           mortgageInterest: data.mortgageInterest,
           debtService: data.debtService,

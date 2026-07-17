@@ -202,6 +202,20 @@ export async function getWorksheetData(
     );
   }
 
+  // Order: income first (keep its natural order), then expenses A→Z by category,
+  // with subcategories alphabetical within each parent. (Array.sort is stable, so
+  // income rows keep insertion order.)
+  groups.sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === "income" ? -1 : 1;
+    if (a.kind === "expense") {
+      return (
+        a.category.localeCompare(b.category) ||
+        (a.subcategory ?? "").localeCompare(b.subcategory ?? "")
+      );
+    }
+    return 0;
+  });
+
   const window = scheduleWindowForYear(property, year);
   const mortgageInterest = window.reduce((s, r) => s + r.interest, 0);
   const debtService = window.reduce((s, r) => s + r.payment, 0);

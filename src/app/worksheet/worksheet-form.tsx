@@ -113,19 +113,23 @@ export function WorksheetForm({
   }
 
   const totals = useMemo(() => {
-    let income = 0;
-    let expense = 0;
-    let untracked = 0;
-    for (const g of groups) {
-      if (g.kind === "income") income += trackedSum(g.items);
-      else expense += trackedSum(g.items);
-      untracked += untrackedSum(g.items);
-    }
-    const noi = income - expense;
+    const sec = (kind: "income" | "expense") => {
+      let counted = 0;
+      let uncounted = 0;
+      for (const g of groups) {
+        if (g.kind !== kind) continue;
+        counted += trackedSum(g.items);
+        uncounted += untrackedSum(g.items);
+      }
+      return { counted, uncounted, total: counted + uncounted };
+    };
+    const income = sec("income");
+    const expense = sec("expense");
+    const noi = income.counted - expense.counted;
     return {
       income,
       expense,
-      untracked,
+      untracked: income.uncounted + expense.uncounted,
       noi,
       cashFlow: noi - constants.debtService,
       taxable: noi - constants.mortgageInterest - constants.depreciation,
@@ -245,72 +249,120 @@ export function WorksheetForm({
     </div>
   );
 
+  // Render one leaf group's editable rows (amount + note + track toggle + itemize).
+  function renderLeaf(g: Group, i: number, asSub: boolean) {
+    const subtotal = trackedSum(g.items);
+    const label = asSub
+      ? g.subcategory ?? g.category
+      : g.subcategory
+        ? `${g.category} › ${g.subcategory}`
+        : g.category;
+    return (
+      <div
+        key={`${g.category}-${g.subcategory}`}
+        className={asSub ? "border-l-2 border-border pl-3" : ""}
+      >
+        <div className="flex items-center justify-between">
+          <span className={`text-sm ${asSub ? "text-foreground" : "font-medium"}`}>
+            {label}
+          </span>
+          {g.items.length > 1 && (
+            <span className="text-xs text-muted tabular-nums">
+              {currency(subtotal, { cents: true })}
+            </span>
+          )}
+        </div>
+        <div className="mt-1 space-y-1">
+          {g.items.length > 0 ? (
+            g.items.map((it, ii) => (
+              <ItemRow
+                key={it.key}
+                item={it}
+                onAmount={(v) => patchItem(i, ii, { amount: v })}
+                onDesc={(v) => patchItem(i, ii, { description: v })}
+                onToggle={() => patchItem(i, ii, { tracked: !it.tracked })}
+                onRemove={() => removeItem(i, ii)}
+                canRemove={g.items.length > 1}
+              />
+            ))
+          ) : (
+            <ItemRow
+              item={{ key: "empty", description: "", amount: "", tracked: true }}
+              onAmount={(v) => setFirstAmount(i, v)}
+              onDesc={() => {}}
+              onToggle={() => {}}
+              onRemove={() => {}}
+              canRemove={false}
+            />
+          )}
+        </div>
+        <button
+          onClick={() => addItem(i)}
+          className="mt-1 text-xs text-accent hover:underline"
+        >
+          + itemize
+        </button>
+      </div>
+    );
+  }
+
   function renderSection(
     title: string,
     entries: { g: Group; i: number }[],
-    total: number,
+    tot: { counted: number; uncounted: number; total: number },
   ) {
+    // Group leaves by their parent category, preserving order.
+    const order: string[] = [];
+    const byCat = new Map<string, { g: Group; i: number }[]>();
+    for (const e of entries) {
+      if (!byCat.has(e.g.category)) {
+        byCat.set(e.g.category, []);
+        order.push(e.g.category);
+      }
+      byCat.get(e.g.category)!.push(e);
+    }
+
     return (
       <div className="rounded-xl border border-border bg-surface">
-        <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-          <h2 className="text-sm font-semibold">{title}</h2>
-          <span className="text-sm font-semibold tabular-nums">
-            {currency(total, { cents: true })}
-          </span>
+        <div className="border-b border-border px-4 py-2.5">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold">{title}</h2>
+            <span className="text-sm font-semibold tabular-nums">
+              {currency(tot.counted, { cents: true })}
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs text-muted">
+            Total {currency(tot.total)} · Counted {currency(tot.counted)} · Uncounted{" "}
+            {currency(tot.uncounted)}
+          </p>
         </div>
         <div className="divide-y divide-border">
-          {entries.map(({ g, i }) => {
-            const subtotal = trackedSum(g.items);
-            const hasRows = g.items.length > 0;
+          {order.map((cat) => {
+            const members = byCat.get(cat)!;
+            // Only categories with 2+ types get the parent-header + indented layout.
+            if (members.length <= 1) {
+              return (
+                <div key={cat} className="px-4 py-2">
+                  {renderLeaf(members[0].g, members[0].i, false)}
+                </div>
+              );
+            }
+            // category with subtypes: header + indented subcategories
+            const parentTotal = members.reduce(
+              (s, m) => s + trackedSum(m.g.items),
+              0,
+            );
             return (
-              <div key={`${g.category}-${g.subcategory}`} className="px-4 py-2">
+              <div key={cat} className="px-4 py-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">
-                    {g.subcategory ? (
-                      <>
-                        <span className="text-muted">{g.category} › </span>
-                        {g.subcategory}
-                      </>
-                    ) : (
-                      g.category
-                    )}
+                  <span className="text-sm font-semibold">{cat}</span>
+                  <span className="text-xs text-muted tabular-nums">
+                    {currency(parentTotal, { cents: true })}
                   </span>
-                  {g.items.length > 1 && (
-                    <span className="text-xs text-muted tabular-nums">
-                      {currency(subtotal, { cents: true })}
-                    </span>
-                  )}
                 </div>
-                <div className="mt-1 space-y-1">
-                  {hasRows ? (
-                    g.items.map((it, ii) => (
-                      <ItemRow
-                        key={it.key}
-                        item={it}
-                        onAmount={(v) => patchItem(i, ii, { amount: v })}
-                        onDesc={(v) => patchItem(i, ii, { description: v })}
-                        onToggle={() => patchItem(i, ii, { tracked: !it.tracked })}
-                        onRemove={() => removeItem(i, ii)}
-                        canRemove={g.items.length > 1}
-                      />
-                    ))
-                  ) : (
-                    <ItemRow
-                      item={{ key: "empty", description: "", amount: "", tracked: true }}
-                      onAmount={(v) => setFirstAmount(i, v)}
-                      onDesc={() => {}}
-                      onToggle={() => {}}
-                      onRemove={() => {}}
-                      canRemove={false}
-                    />
-                  )}
+                <div className="mt-1.5 space-y-2 pl-1">
+                  {members.map((m) => renderLeaf(m.g, m.i, true))}
                 </div>
-                <button
-                  onClick={() => addItem(i)}
-                  className="mt-1 text-xs text-accent hover:underline"
-                >
-                  + itemize
-                </button>
               </div>
             );
           })}

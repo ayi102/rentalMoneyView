@@ -290,7 +290,7 @@ export function WorksheetForm({
         />
       </div>
 
-      <div className="sticky bottom-0 flex items-center gap-3 rounded-xl border border-border bg-surface/95 p-3 backdrop-blur">
+      <div className="sticky bottom-0 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface/95 p-3 backdrop-blur">
         <button
           onClick={onSave}
           disabled={pending || !dirty}
@@ -300,12 +300,13 @@ export function WorksheetForm({
         </button>
         {dirty && !pending && <span className="text-sm text-muted">Unsaved changes</span>}
         {saved && !dirty && <span className="text-sm text-positive">Saved ✓</span>}
-        <span className="ml-auto text-xs text-muted">
+        {/* Help text is desktop-only — on a phone the toolbar needs the room. */}
+        <span className="hidden text-xs text-muted sm:ml-auto sm:inline">
           One line = a single value; “+ itemize” to break it out. Untick the dot to keep
           a line but leave it out of totals.
         </span>
         {confirmingDelete ? (
-          <span className="flex items-center gap-2 text-sm">
+          <span className="ml-auto flex flex-wrap items-center gap-2 text-sm sm:ml-0">
             <span className="text-negative">
               Delete all {groups.reduce((n, g) => n + g.items.length, 0)} lines for{" "}
               {year}?
@@ -329,7 +330,7 @@ export function WorksheetForm({
           <button
             onClick={() => setConfirmingDelete(true)}
             disabled={pending}
-            className="text-sm text-negative hover:underline disabled:opacity-50"
+            className="ml-auto text-sm text-negative hover:underline disabled:opacity-50 sm:ml-0"
           >
             Delete {year}
           </button>
@@ -478,39 +479,48 @@ function ItemRow({
 }) {
   const dim = item.tracked ? "" : "opacity-50";
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1">
+      {/* Visible dot stays small, but the padding gives it a thumb-sized hit area. */}
       <button
         onClick={onToggle}
         title={item.tracked ? "Tracked — counts toward totals" : "Not tracked — recorded but excluded"}
         aria-label={item.tracked ? "Tracked" : "Not tracked"}
-        className={`h-4 w-4 shrink-0 rounded-full border transition ${
-          item.tracked
-            ? "border-accent bg-accent"
-            : "border-border bg-transparent"
-        }`}
-      />
+        aria-pressed={item.tracked}
+        className="-m-1 shrink-0 p-2.5"
+      >
+        <span
+          className={`block h-4 w-4 rounded-full border transition ${
+            item.tracked
+              ? "border-accent bg-accent"
+              : "border-border bg-transparent"
+          }`}
+        />
+      </button>
       <div className={`flex items-center gap-1 ${dim}`}>
         <span className="text-muted">$</span>
         <input
           type="number"
           step="0.01"
+          // Brings up the decimal keypad on a phone instead of the full keyboard.
+          inputMode="decimal"
           value={item.amount}
           onChange={(e) => onAmount(e.target.value)}
           placeholder="0"
-          className="w-28 rounded-md border border-border bg-background px-2 py-1 text-right text-sm tabular-nums outline-none focus:border-accent"
+          className="w-24 rounded-md border border-border bg-background px-2 py-1 text-right text-sm tabular-nums outline-none focus:border-accent sm:w-28"
         />
       </div>
+      {/* min-w-0 lets this shrink instead of pushing the row wider than the phone. */}
       <input
         type="text"
         value={item.description}
         onChange={(e) => onDesc(e.target.value)}
         placeholder={item.tracked ? "note (optional)" : "why not tracked"}
-        className={`min-w-[8rem] flex-1 rounded-md border border-transparent bg-transparent px-2 py-1 text-sm text-muted outline-none focus:border-border focus:bg-background ${dim}`}
+        className={`min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2 py-1 text-sm text-muted outline-none focus:border-border focus:bg-background ${dim}`}
       />
       {canRemove && (
         <button
           onClick={onRemove}
-          className="text-muted hover:text-negative"
+          className="-m-1 shrink-0 p-2.5 text-muted hover:text-negative"
           aria-label="Remove line"
         >
           ✕

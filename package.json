@@ -17,7 +17,8 @@
     "import": "tsx scripts/import-spreadsheets.ts",
     "check:finance": "tsx scripts/check-finance.ts",
     "check:env": "node --env-file=.env --import tsx scripts/check-env.ts",
-    "setup:env": "tsx scripts/setup-env.ts"
+    "setup:env": "tsx scripts/setup-env.ts",
+    "verify:data": "tsx scripts/verify-data.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

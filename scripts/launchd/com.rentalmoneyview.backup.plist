@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.rentalmoneyview.backup</string>
+
+  <!-- The wrapper sets PATH and loads .env; see scripts/backup-cron.sh -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>/Users/ayi102/Developer/rentalMoneyView/scripts/backup-cron.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/ayi102/Developer/rentalMoneyView</string>
+
+  <!-- Daily at 12:30 local time. If the Mac is asleep then, launchd runs the
+       missed job once it wakes, so a closed laptop only delays a backup. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>12</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+
+  <!-- The wrapper keeps its own timestamped log at data/backup.log. These two
+       only catch anything that fails before the wrapper starts logging. -->
+  <key>StandardOutPath</key>
+  <string>/Users/ayi102/Developer/rentalMoneyView/data/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/ayi102/Developer/rentalMoneyView/data/launchd.err.log</string>
+
+  <!-- Don't compete with foreground work. -->
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

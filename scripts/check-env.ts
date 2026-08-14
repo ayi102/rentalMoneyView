@@ -74,8 +74,8 @@ if (databaseUrl) {
     if (pooled) {
       if (pooled.port === "5432") {
         err(
-          "DATABASE_URL uses port 5432 (direct). It should be the pooled port 6543 — " +
-            "you may have the two connection strings swapped.",
+          "DATABASE_URL uses port 5432 (session pooler). It should be the " +
+            "transaction pooler on 6543 — the two strings look swapped.",
         );
       } else if (pooled.port !== "6543") {
         warn(
@@ -102,12 +102,12 @@ if (directUrl) {
   if (direct) {
     if (direct.port === "6543") {
       err(
-        "DIRECT_URL uses the pooled port 6543. Migrations need a real session on " +
-          "5432 and will hang otherwise — the two strings look swapped.",
+        "DIRECT_URL uses the transaction pooler port 6543. Migrations need a real " +
+          "session on 5432 and will hang otherwise — the two strings look swapped.",
       );
     } else if (direct.port !== "5432") {
       warn(
-        `DIRECT_URL uses port ${direct.port}; the direct connection is normally 5432.`,
+        `DIRECT_URL uses port ${direct.port}; the session pooler is normally 5432.`,
       );
     }
     if (pooled && direct.port === pooled.port) {

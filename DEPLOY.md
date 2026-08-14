@@ -35,9 +35,22 @@ This app has **no sign-up page** on purpose — one account, created by hand.
 
 Copy `.env.example` to `.env` and fill it in from the dashboard:
 
-- `DATABASE_URL` / `DIRECT_URL` — Project Settings → Database → Connection string.
-  Note the two different ports (6543 pooled for the app, 5432 direct for
-  migrations). `.env.example` explains why.
+- `DATABASE_URL` / `DIRECT_URL` — click **Connect** at the top of the project
+  dashboard. Nothing there is labelled with those names; they're Prisma's. Take the
+  **shared pooler (Supavisor)** strings, which are identical except for the port:
+
+  | Variable | Pooler mode | Port |
+  |---|---|---|
+  | `DATABASE_URL` | Transaction | **6543** |
+  | `DIRECT_URL` | Session | **5432** |
+
+  Both use `aws-<region>.pooler.supabase.com` and user `postgres.<project-ref>`.
+  Don't use the "Direct connection" option (`db.<project-ref>.supabase.co`) —
+  Supabase's Prisma guide points at the session pooler, and direct connections are
+  IPv6-only on newer projects without the paid IPv4 add-on.
+
+  Each string contains a literal `[YOUR-PASSWORD]` placeholder — swap in the
+  database password from step 1.
 - `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Project Settings → API.
 
 Never put the `service_role` / secret key in a `NEXT_PUBLIC_` variable — that would

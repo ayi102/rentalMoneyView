@@ -20,7 +20,9 @@ log every dollar in and out, but decide per entry what actually counts.
 
 ## Tech
 
-Next.js (App Router) · TypeScript · Tailwind · Prisma · SQLite · Recharts.
+Next.js (App Router) · TypeScript · Tailwind · Prisma · Postgres · Recharts,
+deployed on Vercel with Postgres and Auth on Supabase. Installs to your phone's
+home screen as a standalone app.
 The finance math lives in a pure, tested module (`src/lib/finance.ts`) verified
 against real spreadsheet figures (`scripts/check-finance.ts`).
 
@@ -28,16 +30,23 @@ against real spreadsheet figures (`scripts/check-finance.ts`).
 
 ```bash
 npm install
-npm run db:push     # create the SQLite database from the schema
-npm run db:seed     # seed the category taxonomy (safe, no personal data)
-npm run dev         # http://localhost:3000
+cp .env.example .env   # then fill in your Supabase values
+npm run db:deploy      # create the tables from the committed migration
+npm run db:seed        # seed the category taxonomy (safe, no personal data)
+npm run dev            # http://localhost:3000
 ```
+
+Full setup — creating the Supabase project, your login, and deploying — is in
+[DEPLOY.md](DEPLOY.md).
 
 ### Your data / privacy
 
-- Data lives in a local SQLite file at `prisma/dev.db` — it never leaves your machine.
-- `prisma/dev.db`, `.env`, `prisma/seed.local.ts`, and all spreadsheets (`*.xlsx`,
-  `*.csv`, …) are **git-ignored** and never committed.
+- The app is **private behind a login**; every page and every write checks the
+  session server-side. It's `noindex` everywhere and has no sign-up page.
+- There is deliberately **no offline cache**, so your figures never sit in
+  on-device storage.
+- `.env`, `prisma/seed.local.ts`, `/data/` (database dumps), and all spreadsheets
+  (`*.xlsx`, `*.csv`, …) are **git-ignored** and never committed.
 - Your property + real figures are seeded by a git-ignored `prisma/seed.local.ts`
   (run `npx tsx prisma/seed.local.ts`). `prisma/seed.ts` only contains the generic
   category list, so nothing sensitive is ever in version control.
@@ -62,12 +71,12 @@ which makes NOI, cash flow, and taxable income match the sheet exactly.
 ### Useful scripts
 
 ```bash
-npm run db:studio            # browse the database in Prisma Studio
-npx tsx scripts/check-finance.ts   # verify the finance engine against known figures
+npm run db:studio      # browse the database in Prisma Studio
+npm run check:finance  # verify the finance engine against known figures
+npm run db:export      # dump every row to data/local-dump.json (git-ignored)
+npm run db:load        # load that dump into whatever DATABASE_URL points at
 ```
 
-## Deploying later (optional)
+## Deploying
 
-The app is local-first but structured to deploy to Vercel (free Hobby plan) for phone
-access: switch the Prisma datasource from `sqlite` to `postgresql` and point
-`DATABASE_URL` at a free hosted Postgres (Neon / Vercel Postgres). No app-code changes.
+See [DEPLOY.md](DEPLOY.md) — Supabase + Vercel, free tier on both.

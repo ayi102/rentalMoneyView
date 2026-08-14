@@ -8,17 +8,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 npm run dev                        # dev server on :3000
-npm run build                      # production build (also the type check — there is no separate tsc script)
+npm run build                      # prisma generate && next build (also the type check — no separate tsc script)
 npm run lint                       # eslint (flat config, eslint-config-next)
 
-npm run db:push                    # apply schema.prisma to SQLite (no migrations dir — db push only)
+npm run db:deploy                  # apply committed migrations (prisma migrate deploy)
+npm run db:migrate                 # create a new migration from schema changes (needs DIRECT_URL)
 npm run db:seed                    # seed category taxonomy only (generic, committed)
 npx tsx prisma/seed.local.ts       # seed the real property + figures (git-ignored, may not exist)
 npm run db:studio                  # browse the DB
 
+npm run db:export                  # dump every row to data/local-dump.json (git-ignored)
+npm run db:load                    # load that dump into the current DATABASE_URL
+
 npm run import                     # import per-year "... (YYYY).xlsx" from $RENTAL_XLSX_DIR
 npx tsx scripts/import-spreadsheets.ts "/path/to/folder"
 ```
+
+Requires a `.env` — copy `.env.example`. Four variables matter: `DATABASE_URL`
+(pooled, port 6543), `DIRECT_URL` (direct, 5432, migrations only),
+`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`. See
+[DEPLOY.md](DEPLOY.md).
 
 ### Verifying finance changes
 
@@ -35,6 +44,9 @@ NPV / IRR / MIRR (the last three against known Excel examples). To add a case, a
 `check(label, actual, expected, tol)` line.
 
 ## Architecture
+
+Hosted on Vercel with Postgres + Auth on Supabase. Data lives in Postgres; there is
+no SQLite anymore (the old `prisma/dev.db` was migrated via `db:export` → `db:load`).
 
 Strictly layered, one direction only:
 
@@ -54,7 +66,31 @@ Strictly layered, one direction only:
    read the same ledger.
 
 Three pages: `/` all-years portfolio, `/worksheet` per-year editable grid (the source of
-truth), `/projection` NPV/IRR/MIRR + assumptions.
+truth), `/projection` NPV/IRR/MIRR + assumptions. Plus `/login`.
+
+## Auth — where the boundary actually is
+
+The whole app is private. Two layers, and it matters which one is load-bearing:
+
+- **`src/proxy.ts`** (Next 16 renamed Middleware → **Proxy**; it must be named
+  `proxy.ts` and sits beside `app/`) redirects signed-out requests to `/login`, keeps
+  the Supabase session cookie fresh, and issues the per-request CSP nonce. This is an
+  **optimistic pre-filter, not the security boundary** — it runs on prefetches, and
+  Next has shipped proxy-bypass advisories before.
+- **`requireUser()` in [src/lib/auth.ts](src/lib/auth.ts)** is the real check. **Every
+  page and every Server Action calls it.** Server Actions are reachable as HTTP
+  endpoints regardless of what the UI renders, so anything that reads or writes data
+  without calling it is a hole. It verifies the JWT signature via `getClaims()`
+  instead of trusting cookie contents, and is wrapped in React `cache()` so one
+  render pass verifies once.
+
+There is no sign-up route by design: the single account is created in the Supabase
+dashboard and public sign-ups are disabled there. When adding a page or action, wire
+`requireUser()` in as the first line.
+
+Because Prisma connects with database credentials, it bypasses Postgres RLS. That's
+fine while every query sits behind `requireUser()` — revisit if a second user or any
+browser-side query is ever added.
 
 ## The data model and its invariants
 
@@ -123,8 +159,8 @@ principal-paid reflects reality rather than a projection.
 This repo is public-safe; the user's financial data is not. Never commit or hardcode real
 figures.
 
-- `prisma/dev.db`, `.env`, `prisma/seed.local.ts`, `*.local.ts`, and all spreadsheets
-  (`*.xlsx`, `*.csv`, …) are git-ignored.
+- `.env`, `prisma/seed.local.ts`, `*.local.ts`, `/data/` (which holds `db:export`
+  dumps), any `*.db`, and all spreadsheets (`*.xlsx`, `*.csv`, …) are git-ignored.
 - `prisma/seed.ts` contains the generic category list only. Real property + figures go in
   the git-ignored `prisma/seed.local.ts`.
 - The importer reads every number from the user's files at runtime and writes only to the
@@ -143,5 +179,10 @@ Tailwind v4, CSS-first config — no `tailwind.config.js`. Semantic color tokens
 
 ## Deploying
 
-Local-first but Vercel-ready: switch the Prisma datasource `provider` from `sqlite` to
-`postgresql` and point `DATABASE_URL` at hosted Postgres. No app-code changes.
+See [DEPLOY.md](DEPLOY.md) for the full Supabase + Vercel checklist. Two details that
+bite:
+
+- **Two connection URLs.** Runtime uses the pooled one (6543); `prisma migrate` needs
+  the direct one (5432) and will hang on the pooled URL.
+- **`prisma generate` must run in the build** (`npm run build` does this). Vercel caches
+  `node_modules`, so a `postinstall` hook alone doesn't reliably regenerate the client.

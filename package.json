@@ -4,21 +4,28 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
     "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
-    "import": "tsx scripts/import-spreadsheets.ts"
+    "db:export": "tsx scripts/export-local-data.ts",
+    "db:load": "tsx scripts/load-data.ts",
+    "import": "tsx scripts/import-spreadsheets.ts",
+    "check:finance": "tsx scripts/check-finance.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
+    "@supabase/ssr": "^0.12.4",
+    "@supabase/supabase-js": "^2.112.3",
     "exceljs": "^4.4.0",
-    "next": "16.2.10",
+    "next": "^16.3.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "recharts": "^3.9.2"
@@ -29,8 +36,9 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.10",
+    "eslint-config-next": "^16.3.1",
     "prisma": "^6.19.3",
+    "sharp": "^0.35.3",
     "tailwindcss": "^4",
     "tsx": "^4.23.0",
     "typescript": "^5"

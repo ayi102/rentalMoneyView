@@ -22,7 +22,8 @@ let pass = 0;
 let fail = 0;
 function check(label: string, actual: number, expected: number, tol = 1) {
   const ok = Math.abs(actual - expected) <= tol;
-  (ok ? pass++ : fail++, void 0);
+  if (ok) pass++;
+  else fail++;
   console.log(
     `${ok ? "✅" : "❌"} ${label.padEnd(34)} got ${actual.toFixed(2).padStart(12)}  expected ~${expected.toFixed(2)}`,
   );

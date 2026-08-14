@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { deleteYear, saveWorksheet, type WorksheetSaveItem } from "@/lib/actions";
 import { currency } from "@/lib/format";
@@ -26,6 +26,12 @@ interface Group {
   items: Item[];
 }
 
+// Stable React keys for rows. A module-level counter (rather than a ref) keeps this
+// usable inside useState initializers: keys only need to be unique among siblings,
+// and they never reach the DOM, so a monotonic counter is enough.
+let idCounter = 0;
+const nextId = () => `k${idCounter++}`;
+
 const trackedSum = (items: Item[]) =>
   items.reduce((s, it) => s + (it.tracked ? parseFloat(it.amount) || 0 : 0), 0);
 const untrackedSum = (items: Item[]) =>
@@ -45,8 +51,6 @@ export function WorksheetForm({
   constants: Constants;
 }) {
   const router = useRouter();
-  const idRef = useRef(0);
-  const nextId = () => `k${idRef.current++}`;
 
   const [groups, setGroups] = useState<Group[]>(() =>
     initialGroups.map((g) => ({

@@ -18,17 +18,23 @@
 import fs from "node:fs";
 import path from "node:path";
 import { PrismaClient } from "@prisma/client";
+import { FORMAT_VERSION } from "./lib/dump";
 
 const prisma = new PrismaClient();
 
 const args = process.argv.slice(2);
 const force = args.includes("--force");
+// Validate a dump without writing anything. An unverified backup is only a hope,
+// so this makes "is this file actually restorable?" answerable at any time.
+const dryRun = args.includes("--dry-run");
 const file = args.find((a) => !a.startsWith("--")) ?? "data/local-dump.json";
 
-const SUPPORTED_FORMAT = 1;
+const SUPPORTED_FORMAT = FORMAT_VERSION;
 
 interface Dump {
   formatVersion: number;
+  /** Added alongside backups; older dumps won't have it. */
+  exportedAt?: string;
   properties: Record<string, unknown>[];
   transactions: Record<string, unknown>[];
   mileage: Record<string, unknown>[];
@@ -47,6 +53,78 @@ function revive<T extends Record<string, unknown>>(
   return out as T;
 }
 
+/**
+ * Check a dump could be restored, without connecting to any database: every row
+ * revives, dates parse, foreign keys resolve, and nothing is empty.
+ */
+function validateOnly(dump: Dump, dumpPath: string): void {
+  const problems: string[] = [];
+
+  const properties = dump.properties.map((p) =>
+    revive(p, ["purchaseDate", "createdAt", "updatedAt"]),
+  );
+  const transactions = dump.transactions.map((t) =>
+    revive(t, ["date", "createdAt", "updatedAt"]),
+  );
+  const mileage = dump.mileage.map((m) => revive(m, ["date", "createdAt"]));
+
+  // Any date that failed to parse becomes Invalid Date, which would insert as null
+  // or throw — either way it's corruption worth catching here.
+  const badDates = (rows: Record<string, unknown>[], fields: string[]) =>
+    rows.filter((r) =>
+      fields.some((f) => {
+        const v = r[f];
+        return v instanceof Date && Number.isNaN(v.getTime());
+      }),
+    ).length;
+
+  const bad =
+    badDates(properties, ["purchaseDate", "createdAt", "updatedAt"]) +
+    badDates(transactions, ["date", "createdAt", "updatedAt"]) +
+    badDates(mileage, ["date", "createdAt"]);
+  if (bad > 0) problems.push(`${bad} row(s) contain an unparseable date`);
+
+  // Transactions and mileage reference a property by id; a dump missing its
+  // parent property would fail on insert.
+  const propertyIds = new Set(properties.map((p) => p.id as string));
+  const orphans = [...transactions, ...mileage].filter(
+    (r) => !propertyIds.has(r.propertyId as string),
+  ).length;
+  if (orphans > 0) {
+    problems.push(`${orphans} transaction/mileage row(s) reference a missing property`);
+  }
+
+  if (properties.length === 0) problems.push("no properties in the dump");
+  if (transactions.length === 0) problems.push("no transactions in the dump");
+
+  const years = [
+    ...new Set(
+      transactions
+        .map((t) => t.date as Date)
+        .filter((d) => d instanceof Date && !Number.isNaN(d.getTime()))
+        .map((d) => d.getUTCFullYear()),
+    ),
+  ].sort();
+
+  console.log(`Dry run — nothing was written.\n`);
+  console.log(`  file          ${dumpPath}`);
+  if (dump.exportedAt) console.log(`  exported      ${dump.exportedAt}`);
+  console.log(`  formatVersion ${dump.formatVersion}`);
+  console.log(`  properties    ${properties.length}`);
+  console.log(`  transactions  ${transactions.length}`);
+  console.log(`  mileage       ${mileage.length}`);
+  console.log(`  categories    ${dump.categories.length}`);
+  console.log(`  years         ${years.join(", ") || "(none)"}`);
+
+  if (problems.length) {
+    console.error(`\nThis dump would NOT restore cleanly:`);
+    for (const p of problems) console.error(`  - ${p}`);
+    process.exit(1);
+  }
+  console.log(`\nThis dump is restorable. To actually restore it:`);
+  console.log(`  npx tsx scripts/load-data.ts "${dumpPath}" --force`);
+}
+
 async function main() {
   const dumpPath = path.resolve(file);
   if (!fs.existsSync(dumpPath)) {
@@ -62,6 +140,11 @@ async function main() {
       `Dump formatVersion ${dump.formatVersion}, this script understands ${SUPPORTED_FORMAT}.`,
     );
     process.exit(1);
+  }
+
+  if (dryRun) {
+    validateOnly(dump, dumpPath);
+    return;
   }
 
   const [existingProps, existingTxns, existingCats] = await Promise.all([

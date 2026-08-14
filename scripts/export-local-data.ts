@@ -16,44 +16,29 @@
 import fs from "node:fs";
 import path from "node:path";
 import { PrismaClient } from "@prisma/client";
+import { countsOf, describe, dumpAll } from "./lib/dump";
 
 const prisma = new PrismaClient();
 
 const OUT = process.argv[2] ?? "data/local-dump.json";
 
 async function main() {
-  const [properties, transactions, mileage, categories] = await Promise.all([
-    prisma.property.findMany({ orderBy: { createdAt: "asc" } }),
-    prisma.transaction.findMany({ orderBy: { date: "asc" } }),
-    prisma.mileageEntry.findMany({ orderBy: { date: "asc" } }),
-    prisma.category.findMany({ orderBy: { sortOrder: "asc" } }),
-  ]);
-
-  const dump = {
-    // Bumped if the shape below ever changes, so load-data.ts can refuse a
-    // dump it doesn't understand.
-    formatVersion: 1,
-    properties,
-    transactions,
-    mileage,
-    categories,
-  };
+  const dump = await dumpAll(prisma);
 
   const outPath = path.resolve(OUT);
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   // Dates serialize to ISO strings via JSON.stringify; load-data.ts parses them back.
-  fs.writeFileSync(outPath, JSON.stringify(dump, null, 2));
+  fs.writeFileSync(outPath, JSON.stringify(dump, null, 2), { mode: 0o600 });
 
   console.log(`Wrote ${outPath}`);
-  console.log(
-    `  properties   ${properties.length}\n` +
-      `  transactions ${transactions.length}\n` +
-      `  mileage      ${mileage.length}\n` +
-      `  categories   ${categories.length}`,
-  );
+  console.log(describe(countsOf(dump)));
 
   const years = [
-    ...new Set(transactions.map((t) => t.date.getUTCFullYear())),
+    ...new Set(
+      (dump.transactions as { date: Date }[]).map((t) =>
+        t.date.getUTCFullYear(),
+      ),
+    ),
   ].sort();
   console.log(`  years        ${years.join(", ") || "(none)"}`);
 }

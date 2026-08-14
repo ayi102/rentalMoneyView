@@ -14,6 +14,7 @@
     "db:studio": "prisma studio",
     "db:export": "tsx scripts/export-local-data.ts",
     "db:load": "tsx scripts/load-data.ts",
+    "db:backup": "tsx scripts/backup.ts",
     "import": "tsx scripts/import-spreadsheets.ts",
     "check:finance": "tsx scripts/check-finance.ts",
     "check:env": "node --env-file=.env --import tsx scripts/check-env.ts",

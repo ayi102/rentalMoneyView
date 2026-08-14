@@ -1,14 +1,18 @@
 // rentalMoneyView data model.
-// SQLite for local-first use; the same schema works on Postgres later (Vercel) by
-// changing only the datasource provider/url.
-
+// Postgres (Supabase). Two URLs are needed because the app runs on serverless:
+//   DATABASE_URL — the pooled connection (Supabase pooler, port 6543). Used at
+//                  runtime, where many short-lived functions each open a connection.
+//   DIRECT_URL   — the direct connection (port 5432). Used by `prisma migrate`,
+//                  which needs a real session and can't run through a transaction
+//                  pooler.
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // A rental property. Built to support multiple properties later.

@@ -90,7 +90,11 @@ export default async function WorksheetPage({
         <Stat
           label="Taxable Income"
           value={currency(m.taxableIncome)}
-          sub={`after ${currency(m.depreciation)} depreciation`}
+          sub={
+            m.mileageDeduction > 0
+              ? `after ${currency(m.depreciation)} depreciation + ${currency(m.mileageDeduction)} mileage`
+              : `after ${currency(m.depreciation)} depreciation`
+          }
           tone={m.taxableIncome >= 0 ? "negative" : "positive"}
         />
       </div>
@@ -101,6 +105,7 @@ export default async function WorksheetPage({
         year={year}
         groups={data.groups}
         capital={data.capital}
+        trips={data.trips}
         constants={{
           mortgageInterest: data.mortgageInterest,
           debtService: data.debtService,

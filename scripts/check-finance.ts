@@ -5,6 +5,8 @@ import {
   annualDepreciation,
   computeMetrics,
   irr,
+  mileageDeduction,
+  mileageRateFor,
   mirr,
   monthlyPayment,
   npv,
@@ -77,6 +79,46 @@ check(
   12.6094,
   0.01,
 );
+
+// 6. Mileage — IRS business standard rates, which change annually and changed
+// mid-year in both 2022 and 2026. Rates per
+// https://www.irs.gov/tax-professionals/standard-mileage-rates
+const d = (y: number, m: number, day: number) => new Date(Date.UTC(y, m - 1, day));
+check("Rate 2022-06-30 (H1)", mileageRateFor(d(2022, 6, 30)), 0.585, 0);
+check("Rate 2022-07-01 (H2)", mileageRateFor(d(2022, 7, 1)), 0.625, 0);
+check("Rate 2023-03-15", mileageRateFor(d(2023, 3, 15)), 0.655, 0);
+check("Rate 2024-03-15", mileageRateFor(d(2024, 3, 15)), 0.67, 0);
+check("Rate 2025-03-15", mileageRateFor(d(2025, 3, 15)), 0.7, 0);
+check("Rate 2026-06-30 (H1)", mileageRateFor(d(2026, 6, 30)), 0.725, 0);
+check("Rate 2026-07-01 (H2)", mileageRateFor(d(2026, 7, 1)), 0.76, 0);
+
+// A trip either side of the 2022 change must use its own date's rate, not one
+// rate for the whole year.
+check(
+  "Mileage across 2022 split",
+  mileageDeduction([
+    { date: d(2022, 6, 23), miles: 87 }, // × 0.585 = 50.895
+    { date: d(2022, 8, 26), miles: 331 }, // × 0.625 = 206.875
+  ]),
+  257.77,
+  0.01,
+);
+
+// Mileage must behave like depreciation: taxable income only. NOI, cap rate and
+// cash flow are cash measures and the standard rate is not a cash cost.
+const withMileage = computeMetrics(
+  entries,
+  { ...terms, buildingValuePct: 0.86, points: 171.91, closingCosts: 9682.15 },
+  12,
+  window2025,
+  [{ date: d(2025, 5, 10), miles: 100 }], // × 0.70 = $70
+);
+check("Mileage: NOI unchanged", withMileage.netOperatingIncome, m.netOperatingIncome, 0);
+check("Mileage: cash flow unchanged", withMileage.cashFlow, m.cashFlow, 0);
+check("Mileage: cap rate unchanged", withMileage.capRate, m.capRate, 0);
+check("Mileage: taxable -$70", withMileage.taxableIncome, m.taxableIncome - 70, 0.01);
+check("Mileage: deduction reported", withMileage.mileageDeduction, 70, 0.01);
+check("Mileage: miles reported", withMileage.mileageMiles, 100, 0);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

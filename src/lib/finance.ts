@@ -3,7 +3,64 @@
 // so it's easy to test and reason about. Mirrors the AOPD spreadsheet model.
 
 export const DEPRECIATION_YEARS = 27.5; // US residential rental straight-line
-export const IRS_MILEAGE_RATE = 0.7; // $/mile (2025 IRS standard rate)
+
+// ---- Mileage --------------------------------------------------------------
+//
+// IRS business standard mileage rates, in $/mile, each effective from the given
+// date until the next entry. A single constant would be wrong: the rate changes
+// annually, and 2022 and 2026 both changed mid-year, so the rate depends on the
+// date of the trip rather than on the tax year.
+//
+// Source: https://www.irs.gov/tax-professionals/standard-mileage-rates
+// ADD A ROW EACH YEAR. Trips after the last entry fall back to the last known
+// rate — see mileageRateFor.
+const MILEAGE_RATES: { from: number; rate: number }[] = [
+  { from: Date.UTC(2022, 0, 1), rate: 0.585 }, // 2022 H1
+  { from: Date.UTC(2022, 6, 1), rate: 0.625 }, // 2022 H2 (mid-year increase)
+  { from: Date.UTC(2023, 0, 1), rate: 0.655 },
+  { from: Date.UTC(2024, 0, 1), rate: 0.67 },
+  { from: Date.UTC(2025, 0, 1), rate: 0.7 },
+  { from: Date.UTC(2026, 0, 1), rate: 0.725 }, // 2026 H1
+  { from: Date.UTC(2026, 6, 1), rate: 0.76 }, // 2026 H2 (mid-year increase)
+];
+
+/** The most recent date the rate table knows about. */
+export const MILEAGE_RATES_KNOWN_THROUGH =
+  MILEAGE_RATES[MILEAGE_RATES.length - 1].from;
+
+export interface MileageLog {
+  date: Date;
+  miles: number;
+}
+
+/**
+ * The IRS business standard rate applying to a trip on `date`.
+ *
+ * Trips before the table starts use the earliest known rate, and trips after it
+ * ends use the latest — both are better than returning zero and silently dropping
+ * a deduction, but the table should be kept current.
+ */
+export function mileageRateFor(date: Date): number {
+  const t = date.getTime();
+  let rate = MILEAGE_RATES[0].rate;
+  for (const period of MILEAGE_RATES) {
+    if (t >= period.from) rate = period.rate;
+    else break;
+  }
+  return rate;
+}
+
+/**
+ * Total deduction for a set of trips, each valued at the rate in force on its own
+ * date. Rounded to cents so it doesn't carry float noise into taxable income.
+ */
+export function mileageDeduction(entries: MileageLog[]): number {
+  const total = entries.reduce(
+    (sum, e) => sum + e.miles * mileageRateFor(e.date),
+    0,
+  );
+  return Math.round(total * 100) / 100;
+}
 
 export interface LoanTerms {
   purchasePrice: number;
@@ -95,7 +152,9 @@ export interface PeriodMetrics {
   mortgagePrincipal: number; // principal portion over the period
   cashFlow: number; // NOI - annual debt service
   depreciation: number;
-  taxableIncome: number; // NOI - interest - depreciation
+  mileageMiles: number; // miles logged in the period
+  mileageDeduction: number; // those miles at the IRS rate in force on each date
+  taxableIncome: number; // NOI - interest - depreciation - mileage
   capRate: number; // NOI / purchase price
   cashInvested: number; // down payment + points + closing costs
   cashOnCashReturn: number; // cashFlow / cashInvested
@@ -109,12 +168,14 @@ export interface PeriodMetrics {
  * @param property        property + loan inputs
  * @param months          months represented (for annualizing debt service)
  * @param scheduleWindow  the amortization rows that fall in this period
+ * @param mileage         trips in this period, for the standard-rate deduction
  */
 export function computeMetrics(
   entries: LedgerEntry[],
   property: PropertyInputs,
   months: number,
   scheduleWindow: AmortizationRow[],
+  mileage: MileageLog[] = [],
 ): PeriodMetrics {
   let grossIncome = 0;
   let operatingExpenses = 0;
@@ -149,7 +210,15 @@ export function computeMetrics(
     (annualDepreciation(property.purchasePrice, property.buildingValuePct) *
       months) /
     12;
-  const taxableIncome = netOperatingIncome - mortgageInterest - depreciation;
+
+  // Standard-rate mileage is a tax construct, not a cash cost — the actual petrol
+  // and wear were never recorded as expenses. So, exactly like depreciation, it
+  // reduces taxable income and leaves NOI, cap rate and cash flow untouched.
+  const mileageMiles = mileage.reduce((s, e) => s + e.miles, 0);
+  const mileageDeductionTotal = mileageDeduction(mileage);
+
+  const taxableIncome =
+    netOperatingIncome - mortgageInterest - depreciation - mileageDeductionTotal;
 
   const capRate =
     property.purchasePrice > 0 ? netOperatingIncome / property.purchasePrice : 0;
@@ -171,6 +240,8 @@ export function computeMetrics(
     mortgagePrincipal,
     cashFlow,
     depreciation,
+    mileageMiles,
+    mileageDeduction: mileageDeductionTotal,
     taxableIncome,
     capRate,
     cashInvested,

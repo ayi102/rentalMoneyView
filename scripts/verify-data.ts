@@ -49,6 +49,8 @@ async function main() {
     ["Interest", 12],
     ["Principal", 11],
     ["Cash Flow", 12],
+    ["Miles", 8],
+    ["Mileage$", 10],
   ] as const;
 
   console.log(cols.map(([h, w]) => pad(h, w)).join(""));
@@ -67,7 +69,9 @@ async function main() {
         pad(money(y.noi), 12) +
         pad(money(y.interest), 12) +
         pad(money(y.principal), 11) +
-        pad(money(y.cashFlow ?? 0), 12),
+        pad(money(y.cashFlow ?? 0), 12) +
+        pad(y.mileageMiles ? String(y.mileageMiles) : "—", 8) +
+        pad(y.mileageDeduction ? money(y.mileageDeduction) : "—", 10),
     );
   }
 
@@ -80,7 +84,12 @@ async function main() {
       pad(money(s.totalNoi), 12) +
       pad(money(s.totalInterest), 12) +
       pad(money(s.principalPaid), 11) +
-      pad(money(s.totalCashFlow), 12),
+      pad(money(s.totalCashFlow), 12) +
+      pad(String(s.years.reduce((n, y) => n + y.mileageMiles, 0)), 8) +
+      pad(
+        money(s.years.reduce((n, y) => n + y.mileageDeduction, 0)),
+        10,
+      ),
   );
 
   console.log(`\nLoan`);

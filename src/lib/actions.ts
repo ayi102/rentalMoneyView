@@ -14,6 +14,14 @@ export interface WorksheetSaveItem {
   isCapital?: boolean;
 }
 
+export interface WorksheetSaveTrip {
+  date: string; // yyyy-mm-dd
+  source: string;
+  destination: string;
+  reason: string;
+  miles: number;
+}
+
 /**
  * Save an entire year's worksheet. This is the single source of truth for the
  * year: it deletes ALL of that year's entries and recreates them from `items`
@@ -24,6 +32,7 @@ export async function saveWorksheet(
   propertyId: string,
   year: number,
   items: WorksheetSaveItem[],
+  trips: WorksheetSaveTrip[] = [],
 ) {
   // A Server Action is a public HTTP endpoint — check auth before touching data.
   await requireUser();
@@ -45,15 +54,42 @@ export async function saveWorksheet(
     );
   }
 
+  const yearRange = {
+    gte: new Date(Date.UTC(year, 0, 1)),
+    lt: new Date(Date.UTC(year + 1, 0, 1)),
+  };
+
+  // Mileage dates are real — the IRS rate changed mid-year in 2022 and 2026, so a
+  // trip's own date determines its rate. Clamp anything outside the year being
+  // saved rather than silently filing it under the wrong one.
+  const validTrips = trips
+    .filter((t) => Number.isFinite(t.miles) && t.miles > 0)
+    .map((t) => {
+      const parsed = new Date(`${t.date}T00:00:00.000Z`);
+      const inYear =
+        !Number.isNaN(parsed.getTime()) &&
+        parsed >= yearRange.gte &&
+        parsed < yearRange.lt;
+      return {
+        date: inYear ? parsed : new Date(Date.UTC(year, 6, 1)),
+        source: t.source?.trim() || null,
+        destination: t.destination?.trim() || null,
+        reason: t.reason?.trim() || null,
+        miles: Math.abs(t.miles),
+      };
+    });
+
   await prisma.$transaction([
     prisma.transaction.deleteMany({
-      where: {
-        propertyId,
-        date: {
-          gte: new Date(Date.UTC(year, 0, 1)),
-          lt: new Date(Date.UTC(year + 1, 0, 1)),
-        },
-      },
+      where: { propertyId, date: yearRange },
+    }),
+    // Mileage is replaced wholesale alongside the ledger, in the same transaction,
+    // so a save can't leave the year half-updated.
+    prisma.mileageEntry.deleteMany({
+      where: { propertyId, date: yearRange },
+    }),
+    prisma.mileageEntry.createMany({
+      data: validTrips.map((t) => ({ ...t, propertyId })),
     }),
     ...items
       .filter((r) => Number.isFinite(r.amount) && Math.abs(r.amount) > 0)

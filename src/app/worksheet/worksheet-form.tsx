@@ -2,9 +2,21 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { deleteYear, saveWorksheet, type WorksheetSaveItem } from "@/lib/actions";
+import {
+  deleteYear,
+  saveWorksheet,
+  type WorksheetSaveItem,
+  type WorksheetSaveTrip,
+} from "@/lib/actions";
 import { currency } from "@/lib/format";
-import type { WorksheetGroup, WorksheetItem } from "@/lib/metrics";
+// finance.ts is pure (no imports at all), so the client can share the exact rate
+// logic the server uses rather than hardcoding a second copy of the tax math.
+import { mileageDeduction, mileageRateFor } from "@/lib/finance";
+import type {
+  WorksheetGroup,
+  WorksheetItem,
+  WorksheetTrip,
+} from "@/lib/metrics";
 
 interface Constants {
   mortgageInterest: number;
@@ -17,6 +29,14 @@ interface Item {
   description: string;
   amount: string;
   tracked: boolean;
+}
+interface Trip {
+  key: string;
+  date: string; // yyyy-mm-dd
+  source: string;
+  destination: string;
+  reason: string;
+  miles: string;
 }
 interface Group {
   kind: "income" | "expense";
@@ -42,12 +62,14 @@ export function WorksheetForm({
   year,
   groups: initialGroups,
   capital: initialCapital,
+  trips: initialTrips,
   constants,
 }: {
   propertyId: string;
   year: number;
   groups: WorksheetGroup[];
   capital: WorksheetItem[];
+  trips: WorksheetTrip[];
   constants: Constants;
 }) {
   const router = useRouter();
@@ -69,6 +91,16 @@ export function WorksheetForm({
       description: it.description,
       amount: it.amount ? String(it.amount) : "",
       tracked: it.tracked,
+    })),
+  );
+  const [trips, setTrips] = useState<Trip[]>(() =>
+    initialTrips.map((t) => ({
+      key: nextId(),
+      date: t.date,
+      source: t.source,
+      destination: t.destination,
+      reason: t.reason,
+      miles: t.miles ? String(t.miles) : "",
     })),
   );
   const [pending, setPending] = useState(false);
@@ -143,6 +175,32 @@ export function WorksheetForm({
     touch();
   }
 
+  // Mileage log
+  function patchTrip(i: number, patch: Partial<Trip>) {
+    setTrips((ts) => ts.map((t, j) => (j === i ? { ...t, ...patch } : t)));
+    touch();
+  }
+  function addTrip() {
+    setTrips((ts) => [
+      ...ts,
+      {
+        key: nextId(),
+        // Default into the year being edited so a new trip is never filed under
+        // the wrong one.
+        date: `${year}-01-01`,
+        source: "",
+        destination: "",
+        reason: "",
+        miles: "",
+      },
+    ]);
+    touch();
+  }
+  function removeTrip(i: number) {
+    setTrips((ts) => ts.filter((_, j) => j !== i));
+    touch();
+  }
+
   const totals = useMemo(() => {
     const sec = (kind: "income" | "expense") => {
       let counted = 0;
@@ -158,6 +216,18 @@ export function WorksheetForm({
     const expense = sec("expense");
     const capitalTotal = trackedSum(capital);
     const noi = income.counted - expense.counted;
+
+    // Each trip is valued at the IRS rate in force on its own date — the rate
+    // changed mid-year in 2022 and 2026, so the date matters, not just the year.
+    const validTrips = trips
+      .map((t) => ({
+        date: new Date(`${t.date}T00:00:00.000Z`),
+        miles: parseFloat(t.miles) || 0,
+      }))
+      .filter((t) => t.miles > 0 && !Number.isNaN(t.date.getTime()));
+    const miles = validTrips.reduce((s, t) => s + t.miles, 0);
+    const mileage = mileageDeduction(validTrips);
+
     return {
       income,
       expense,
@@ -165,10 +235,15 @@ export function WorksheetForm({
       untracked:
         income.uncounted + expense.uncounted + untrackedSum(capital),
       noi,
+      miles,
+      mileage,
+      // Mileage at the standard rate is a tax deduction, not a cash cost, so like
+      // depreciation it leaves cash flow alone and only moves taxable income.
       cashFlow: noi - constants.debtService - capitalTotal,
-      taxable: noi - constants.mortgageInterest - constants.depreciation,
+      taxable:
+        noi - constants.mortgageInterest - constants.depreciation - mileage,
     };
-  }, [groups, capital, constants]);
+  }, [groups, capital, trips, constants]);
 
   async function doDelete() {
     setPending(true);
@@ -213,7 +288,17 @@ export function WorksheetForm({
           isCapital: true,
         });
       }
-      await saveWorksheet(propertyId, year, items);
+      const tripPayload: WorksheetSaveTrip[] = trips
+        .filter((t) => (parseFloat(t.miles) || 0) > 0)
+        .map((t) => ({
+          date: t.date,
+          source: t.source,
+          destination: t.destination,
+          reason: t.reason,
+          miles: parseFloat(t.miles) || 0,
+        }));
+
+      await saveWorksheet(propertyId, year, items, tripPayload);
       setDirty(false);
       setSaved(true);
       router.refresh();
@@ -273,6 +358,57 @@ export function WorksheetForm({
         </div>
       </div>
 
+      {/* Mileage log — a tax deduction, so it moves taxable income only */}
+      <div className="rounded-xl border border-border bg-surface">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5">
+          <h2 className="text-sm font-semibold">
+            Mileage
+            <span className="ml-2 font-normal text-muted">
+              (IRS standard rate — reduces taxable income, not cash flow)
+            </span>
+          </h2>
+          <span className="text-sm font-semibold tabular-nums">
+            {totals.miles.toLocaleString("en-US")} mi ·{" "}
+            {currency(totals.mileage, { cents: true })}
+          </span>
+        </div>
+        <div className="px-4 py-2">
+          {trips.length === 0 ? (
+            <p className="text-sm text-muted">No trips logged this year.</p>
+          ) : (
+            <>
+              {/* Column headers, desktop only — each row is self-labelling on mobile */}
+              <div className="hidden gap-2 pb-1 text-xs uppercase tracking-wide text-muted sm:flex">
+                <span className="w-32">Date</span>
+                <span className="flex-1">From</span>
+                <span className="flex-1">To</span>
+                <span className="flex-1">Reason</span>
+                <span className="w-20 text-right">Miles</span>
+                <span className="w-16 text-right">Rate</span>
+                <span className="w-6" />
+              </div>
+              <div className="space-y-2 sm:space-y-1">
+                {trips.map((t, i) => (
+                  <TripRow
+                    key={t.key}
+                    trip={t}
+                    year={year}
+                    onPatch={(patch) => patchTrip(i, patch)}
+                    onRemove={() => removeTrip(i)}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+          <button
+            onClick={addTrip}
+            className="mt-2 text-xs text-accent hover:underline"
+          >
+            + add trip
+          </button>
+        </div>
+      </div>
+
       {/* Live computed totals */}
       <div className="grid grid-cols-2 gap-3 rounded-xl border border-border bg-surface p-4 md:grid-cols-4">
         <Stat label="Net Operating Income" value={totals.noi} />
@@ -282,7 +418,16 @@ export function WorksheetForm({
           hint="after mortgage & capital"
           sign
         />
-        <Stat label="Taxable Income" value={totals.taxable} sign />
+        <Stat
+          label="Taxable Income"
+          value={totals.taxable}
+          hint={
+            totals.mileage > 0
+              ? `incl. ${currency(totals.mileage, { cents: true })} mileage`
+              : undefined
+          }
+          sign
+        />
         <Stat
           label="Not tracked"
           value={totals.untracked}
@@ -525,6 +670,100 @@ function ItemRow({
         >
           ✕
         </button>
+      )}
+    </div>
+  );
+}
+
+function TripRow({
+  trip,
+  year,
+  onPatch,
+  onRemove,
+}: {
+  trip: Trip;
+  year: number;
+  onPatch: (patch: Partial<Trip>) => void;
+  onRemove: () => void;
+}) {
+  const miles = parseFloat(trip.miles) || 0;
+  const parsed = new Date(`${trip.date}T00:00:00.000Z`);
+  const dateValid = !Number.isNaN(parsed.getTime());
+  const inYear = dateValid && parsed.getUTCFullYear() === year;
+  const rate = dateValid ? mileageRateFor(parsed) : 0;
+
+  const field =
+    "rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus:border-accent";
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b border-border/50 pb-2 sm:flex-nowrap sm:border-0 sm:pb-0">
+      <input
+        type="date"
+        value={trip.date}
+        onChange={(e) => onPatch({ date: e.target.value })}
+        // Nudge toward the year being edited; the server clamps anything outside it.
+        min={`${year}-01-01`}
+        max={`${year}-12-31`}
+        aria-label="Trip date"
+        className={`w-32 ${field} ${inYear ? "" : "border-negative text-negative"}`}
+      />
+      <input
+        type="text"
+        value={trip.source}
+        onChange={(e) => onPatch({ source: e.target.value })}
+        placeholder="from"
+        aria-label="From"
+        className={`min-w-0 flex-1 basis-32 ${field}`}
+      />
+      <input
+        type="text"
+        value={trip.destination}
+        onChange={(e) => onPatch({ destination: e.target.value })}
+        placeholder="to"
+        aria-label="To"
+        className={`min-w-0 flex-1 basis-32 ${field}`}
+      />
+      <input
+        type="text"
+        value={trip.reason}
+        onChange={(e) => onPatch({ reason: e.target.value })}
+        // The IRS expects the business purpose recorded, so this isn't decorative.
+        placeholder="reason"
+        aria-label="Reason"
+        className={`min-w-0 flex-1 basis-32 ${field}`}
+      />
+      <input
+        type="number"
+        step="0.1"
+        inputMode="decimal"
+        value={trip.miles}
+        onChange={(e) => onPatch({ miles: e.target.value })}
+        placeholder="0"
+        aria-label="Miles"
+        className={`w-20 text-right tabular-nums ${field}`}
+      />
+      {/* The rate in force on this trip's date, so the arithmetic is visible. */}
+      <span
+        className="w-16 text-right text-xs tabular-nums text-muted"
+        title={
+          dateValid
+            ? `${miles} mi × $${rate.toFixed(3)}/mi = ${currency(Math.round(miles * rate * 100) / 100, { cents: true })}`
+            : undefined
+        }
+      >
+        {dateValid ? `${(rate * 100).toFixed(1)}¢` : "—"}
+      </span>
+      <button
+        onClick={onRemove}
+        className="-m-1 shrink-0 p-2.5 text-muted hover:text-negative"
+        aria-label="Remove trip"
+      >
+        ✕
+      </button>
+      {!inYear && (
+        <p className="w-full text-xs text-negative">
+          Date is outside {year} — it will be saved as {year}-07-01.
+        </p>
       )}
     </div>
   );

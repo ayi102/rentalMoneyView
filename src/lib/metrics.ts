@@ -10,9 +10,10 @@ import {
   npv,
   type AmortizationRow,
   type LedgerEntry,
+  type MileageLog,
   type PeriodMetrics,
 } from "@/lib/finance";
-import type { Property, Transaction } from "@prisma/client";
+import type { MileageEntry, Property, Transaction } from "@prisma/client";
 
 // Dates in this app are calendar dates (no time-of-day meaning), stored as UTC
 // midnight. All date math uses UTC getters/setters so a "2025-03-01" entry never
@@ -103,6 +104,26 @@ export async function getTransactionsForYear(
   });
 }
 
+export async function getMileageForYear(
+  propertyId: string,
+  year: number,
+): Promise<MileageEntry[]> {
+  return prisma.mileageEntry.findMany({
+    where: {
+      propertyId,
+      date: {
+        gte: new Date(Date.UTC(year, 0, 1)),
+        lt: new Date(Date.UTC(year + 1, 0, 1)),
+      },
+    },
+    orderBy: { date: "asc" },
+  });
+}
+
+function toMileageLog(m: MileageEntry): MileageLog {
+  return { date: m.date, miles: m.miles };
+}
+
 // ---- Worksheet (editable per-year, AOPD-style category grid) ---------------
 
 export interface WorksheetItem {
@@ -122,12 +143,23 @@ export interface WorksheetGroup {
   items: WorksheetItem[];
 }
 
+// One logged trip, as the worksheet edits it. Valued at the IRS standard rate for
+// its own date, so the date matters beyond just which year it belongs to.
+export interface WorksheetTrip {
+  date: string; // yyyy-mm-dd, for an <input type="date">
+  source: string;
+  destination: string;
+  reason: string;
+  miles: number;
+}
+
 export interface WorksheetData {
   property: Property;
   year: number;
   availableYears: number[];
   groups: WorksheetGroup[];
   capital: WorksheetItem[]; // capital additions (isCapital), their own section
+  trips: WorksheetTrip[]; // mileage log for the year
   // constants for live totals as the user types
   mortgageInterest: number;
   debtService: number;
@@ -139,9 +171,10 @@ export async function getWorksheetData(
   property: Property,
   year: number,
 ): Promise<WorksheetData> {
-  const [categories, txns] = await Promise.all([
+  const [categories, txns, mileage] = await Promise.all([
     prisma.category.findMany({ orderBy: { sortOrder: "asc" } }),
     getTransactionsForYear(property.id, year),
+    getMileageForYear(property.id, year),
   ]);
 
   // A category is a "container" if other categories name it as parent.
@@ -236,6 +269,13 @@ export async function getWorksheetData(
     availableYears: await getAvailableYears(property.id),
     groups,
     capital,
+    trips: mileage.map((m) => ({
+      date: m.date.toISOString().slice(0, 10),
+      source: m.source ?? "",
+      destination: m.destination ?? "",
+      reason: m.reason ?? "",
+      miles: m.miles,
+    })),
     mortgageInterest,
     debtService,
     depreciation: annualDepreciation(
@@ -248,13 +288,20 @@ export async function getWorksheetData(
   };
 }
 
-/** Distinct calendar years that have transactions, newest first (always includes current year). */
+/**
+ * Distinct calendar years that have any recorded data, newest first (always
+ * includes the current year). Mileage counts: a year with only logged trips still
+ * needs to be reachable in the year picker, or its entries become unreachable.
+ */
 export async function getAvailableYears(propertyId: string): Promise<number[]> {
-  const txns = await prisma.transaction.findMany({
-    where: { propertyId },
-    select: { date: true },
-  });
-  const years = new Set<number>(txns.map((t) => t.date.getUTCFullYear()));
+  const [txns, mileage] = await Promise.all([
+    prisma.transaction.findMany({ where: { propertyId }, select: { date: true } }),
+    prisma.mileageEntry.findMany({ where: { propertyId }, select: { date: true } }),
+  ]);
+  const years = new Set<number>([
+    ...txns.map((t) => t.date.getUTCFullYear()),
+    ...mileage.map((m) => m.date.getUTCFullYear()),
+  ]);
   years.add(new Date().getUTCFullYear());
   return [...years].sort((a, b) => b - a);
 }
@@ -263,16 +310,19 @@ export async function getYearData(
   property: Property,
   year: number,
 ): Promise<YearData> {
-  const txns = await prisma.transaction.findMany({
-    where: {
-      propertyId: property.id,
-      date: {
-        gte: new Date(Date.UTC(year, 0, 1)),
-        lt: new Date(Date.UTC(year + 1, 0, 1)),
+  const [txns, mileage] = await Promise.all([
+    prisma.transaction.findMany({
+      where: {
+        propertyId: property.id,
+        date: {
+          gte: new Date(Date.UTC(year, 0, 1)),
+          lt: new Date(Date.UTC(year + 1, 0, 1)),
+        },
       },
-    },
-    orderBy: { date: "asc" },
-  });
+      orderBy: { date: "asc" },
+    }),
+    getMileageForYear(property.id, year),
+  ]);
 
   const window = scheduleWindowForYear(property, year);
   const metrics = computeMetrics(
@@ -288,6 +338,7 @@ export async function getYearData(
     },
     12,
     window,
+    mileage.map(toMileageLog),
   );
 
   // Income-by-category (counted). Data is annual, so we summarize by category
@@ -349,6 +400,8 @@ export interface YearRow {
   interest: number;
   principal: number;
   cashFlow: number | null; // null for years with no recorded transactions
+  mileageMiles: number;
+  mileageDeduction: number;
   endingBalance: number;
 }
 
@@ -380,10 +433,16 @@ export interface PortfolioSummary {
 export async function getPortfolioSummary(
   property: Property,
 ): Promise<PortfolioSummary> {
-  const txns = await prisma.transaction.findMany({
-    where: { propertyId: property.id },
-    orderBy: { date: "asc" },
-  });
+  const [txns, allMileage] = await Promise.all([
+    prisma.transaction.findMany({
+      where: { propertyId: property.id },
+      orderBy: { date: "asc" },
+    }),
+    prisma.mileageEntry.findMany({
+      where: { propertyId: property.id },
+      orderBy: { date: "asc" },
+    }),
+  ]);
 
   const hasLoan = !!(
     property.loanTermYears &&
@@ -445,6 +504,13 @@ export async function getPortfolioSummary(
     byYear.get(y)!.push(t);
   }
 
+  const mileageByYear = new Map<number, MileageEntry[]>();
+  for (const m of allMileage) {
+    const y = m.date.getUTCFullYear();
+    if (!mileageByYear.has(y)) mileageByYear.set(y, []);
+    mileageByYear.get(y)!.push(m);
+  }
+
   const years: YearRow[] = [];
   let totalIncome = 0,
     totalOperatingExpenses = 0,
@@ -457,9 +523,17 @@ export async function getPortfolioSummary(
 
   for (let y = purchaseYear; y <= endYear; y++) {
     const entries = byYear.get(y) ?? [];
+    const trips = mileageByYear.get(y) ?? [];
     const window = windowForYear(y);
-    const m = computeMetrics(entries.map(toLedgerEntry), propInputs, 12, window);
-    const hasData = entries.length > 0;
+    const m = computeMetrics(
+      entries.map(toLedgerEntry),
+      propInputs,
+      12,
+      window,
+      trips.map(toMileageLog),
+    );
+    // A year with only mileage and no ledger entries still counts as recorded.
+    const hasData = entries.length > 0 || trips.length > 0;
 
     years.push({
       year: y,
@@ -472,6 +546,8 @@ export async function getPortfolioSummary(
       interest: m.mortgageInterest,
       principal: m.mortgagePrincipal,
       cashFlow: hasData ? m.cashFlow : null,
+      mileageMiles: m.mileageMiles,
+      mileageDeduction: m.mileageDeduction,
       // Year-end balance, or today's balance for the current (incomplete) year.
       endingBalance: balanceAsOf(
         new Date(Math.min(Date.UTC(y, 11, 31), now.getTime())),

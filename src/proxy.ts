@@ -123,6 +123,15 @@ export async function proxy(request: NextRequest) {
   const signedIn = Boolean(data?.claims?.sub);
 
   const { pathname } = request.nextUrl;
+
+  // Route handlers authenticate themselves and must not be bounced to an HTML
+  // login page — a redirect would turn an API call into a confusing 307 + HTML.
+  // Anything added under /api is responsible for its own check; /api/keepalive
+  // verifies the CRON_SECRET bearer token.
+  if (pathname.startsWith("/api/")) {
+    return response;
+  }
+
   const publicPath = isPublic(pathname);
 
   if (!signedIn && !publicPath) {

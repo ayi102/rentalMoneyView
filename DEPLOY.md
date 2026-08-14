@@ -91,21 +91,31 @@ after deploying** — the loop is much faster locally.
 There is deliberately **no offline cache**. The app is online-only, so your
 financial history never sits in on-device storage.
 
-## 8 · Keep the free database from pausing
+## 8 · Keep the free project from pausing — required
 
-Supabase pauses free-tier projects after about a week of inactivity, and a paused
-project has to be resumed by hand from the dashboard. If you'll check the app
-infrequently, add a Vercel Cron job that touches the database daily.
+Supabase pauses free-tier projects after about a week of inactivity, and resuming
+one is a manual click in their dashboard. It pauses the **whole project**, so Auth
+stops working too, not just the database. If you open the app monthly, every visit
+would otherwise find it paused.
 
-`vercel.json`:
+**This is already wired up** — `vercel.json` runs `/api/keepalive` once a day, and
+that route makes one trivial query. All you have to do is set the secret:
 
-```json
-{ "crons": [{ "path": "/api/keepalive", "schedule": "0 12 * * *" }] }
-```
+1. Generate one: `openssl rand -base64 32`
+2. Add it to Vercel as `CRON_SECRET` (Production).
 
-You'd need a small `src/app/api/keepalive/route.ts` that runs one trivial query
-(e.g. `prisma.category.count()`). Not included yet — say the word and I'll add it.
-Note that Hobby crons run once a day at an approximate time, which is plenty here.
+Vercel sends it automatically as `Authorization: Bearer $CRON_SECRET`. Without the
+variable the route returns **503** rather than sitting there publicly callable, so
+if you skip this step the keepalive silently does nothing — check Vercel's cron
+logs after the first day and expect `{"ok":true,...}`.
+
+Notes:
+- Hobby-plan crons fire once a day at an approximate time, which is ample here.
+- Pausing never destroys data. If it does pause, resume it from the Supabase
+  dashboard and nothing is lost.
+- Whether a plain query resets Supabase's idle timer is their behaviour, not
+  something this repo controls — worth confirming once after a couple of weeks of
+  not touching the app.
 
 ---
 

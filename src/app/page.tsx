@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireUser } from "@/lib/auth";
 import { getDefaultProperty, getPortfolioSummary } from "@/lib/metrics";
 import { currency, percent } from "@/lib/format";
 import { LoanPaydownChart } from "./all-years-chart";
@@ -40,6 +41,8 @@ function num(v: number | null, opts?: { cents?: boolean }) {
 }
 
 export default async function HomeAllYears() {
+  await requireUser();
+
   const property = await getDefaultProperty();
   if (!property) {
     return (

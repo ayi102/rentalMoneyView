@@ -2,6 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
+import { requireUser } from "@/lib/auth";
 
 export interface WorksheetSaveItem {
   kind: "income" | "expense";
@@ -24,6 +25,9 @@ export async function saveWorksheet(
   year: number,
   items: WorksheetSaveItem[],
 ) {
+  // A Server Action is a public HTTP endpoint — check auth before touching data.
+  await requireUser();
+
   const property = await prisma.property.findUnique({
     where: { id: propertyId },
   });
@@ -79,6 +83,8 @@ export async function saveWorksheet(
 
 /** Delete every entry (and mileage) for a property in a given year. */
 export async function deleteYear(propertyId: string, year: number) {
+  await requireUser();
+
   const range = {
     gte: new Date(Date.UTC(year, 0, 1)),
     lt: new Date(Date.UTC(year + 1, 0, 1)),
@@ -105,6 +111,8 @@ export async function updateAssumptions(
   propertyId: string,
   a: AssumptionsInput,
 ) {
+  await requireUser();
+
   const pct = (v: number) => (Number.isFinite(v) ? v / 100 : 0);
   await prisma.property.update({
     where: { id: propertyId },

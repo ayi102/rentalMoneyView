@@ -1,3 +1,4 @@
+import { requireUser } from "@/lib/auth";
 import { getDefaultProperty, getProjection } from "@/lib/metrics";
 import { currency, percent } from "@/lib/format";
 import { AssumptionsForm } from "./assumptions-form";
@@ -34,6 +35,8 @@ function Stat({
 const pctOrDash = (v: number | null) => (v == null ? "—" : percent(v));
 
 export default async function ProjectionPage() {
+  await requireUser();
+
   const property = await getDefaultProperty();
   if (!property) {
     return (

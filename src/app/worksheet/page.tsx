@@ -1,3 +1,4 @@
+import { requireUser } from "@/lib/auth";
 import {
   getDefaultProperty,
   getWorksheetData,
@@ -40,6 +41,8 @@ export default async function WorksheetPage({
 }: {
   searchParams: Promise<{ year?: string }>;
 }) {
+  await requireUser();
+
   const property = await getDefaultProperty();
   if (!property) {
     return (

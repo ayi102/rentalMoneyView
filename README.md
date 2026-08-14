@@ -39,6 +39,10 @@ npm run dev            # http://localhost:3000
 Full setup — creating the Supabase project, your login, and deploying — is in
 [DEPLOY.md](DEPLOY.md).
 
+> Migrating an existing database rather than starting fresh? Use `db:export` /
+> `db:load` instead of `db:seed` — the dump already contains the taxonomy, and
+> loading on top of a seeded one is refused.
+
 ### Your data / privacy
 
 - The app is **private behind a login**; every page and every write checks the

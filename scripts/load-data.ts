@@ -64,22 +64,30 @@ async function main() {
     process.exit(1);
   }
 
-  const [existingProps, existingTxns] = await Promise.all([
+  const [existingProps, existingTxns, existingCats] = await Promise.all([
     prisma.property.count(),
     prisma.transaction.count(),
+    // Categories matter here too: the dump carries its own, and Category has a
+    // unique constraint on (kind, name, parent). Loading on top of a seeded
+    // taxonomy would otherwise die on a constraint violation partway through
+    // rather than saying what's wrong. In particular, don't run `db:seed` before
+    // this — the dump already includes the taxonomy.
+    prisma.category.count(),
   ]);
+  const notEmpty = existingProps > 0 || existingTxns > 0 || existingCats > 0;
 
-  if ((existingProps > 0 || existingTxns > 0) && !force) {
+  if (notEmpty && !force) {
     console.error(
-      `Target database is not empty (${existingProps} properties, ${existingTxns} transactions).\n` +
-        `Refusing to load. Re-run with --force to DELETE those rows and replace them.`,
+      `Target database is not empty (${existingProps} properties, ${existingTxns} transactions, ${existingCats} categories).\n` +
+        `Refusing to load. Re-run with --force to DELETE those rows and replace them.\n` +
+        `Note: the dump includes the category taxonomy, so there's no need to run \`db:seed\` first.`,
     );
     process.exit(1);
   }
 
-  if (force && (existingProps > 0 || existingTxns > 0)) {
+  if (force && notEmpty) {
     console.log(
-      `--force: deleting ${existingProps} properties and ${existingTxns} transactions from the target…`,
+      `--force: deleting ${existingProps} properties, ${existingTxns} transactions and ${existingCats} categories from the target…`,
     );
     // Transactions and mileage cascade from Property, but delete explicitly so the
     // counts we print are honest.

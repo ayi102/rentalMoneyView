@@ -15,7 +15,8 @@
     "db:export": "tsx scripts/export-local-data.ts",
     "db:load": "tsx scripts/load-data.ts",
     "import": "tsx scripts/import-spreadsheets.ts",
-    "check:finance": "tsx scripts/check-finance.ts"
+    "check:finance": "tsx scripts/check-finance.ts",
+    "check:env": "node --env-file=.env --import tsx scripts/check-env.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

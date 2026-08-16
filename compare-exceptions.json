@@ -1,0 +1,26 @@
+{
+  "$comment": [
+    "Differences between the app and the spreadsheets that are known and intended.",
+    "Used by `npm run compare:excel` so a deliberate change doesn't leave the check",
+    "permanently red — a check that always fails is a check nobody reads.",
+    "",
+    "SAFETY: an acceptance only ever applies when ALL of that year's totals still",
+    "match (income, operating expenses, capital, NOI). It can therefore excuse money",
+    "being RECLASSIFIED between lines, but never money appearing or disappearing. If",
+    "a total moves, the year fails regardless of what's listed here.",
+    "",
+    "Deliberately records no dollar amounts: this file is committed, and the repo",
+    "must never contain real figures. It also means acceptances don't go stale when",
+    "the numbers change.",
+    "",
+    "`lines` uses the same labels the comparison prints: '+' for income, '−' for",
+    "expense (that's U+2212, not a hyphen), and 'Category › Subcategory'."
+  ],
+  "acceptedDifferences": [
+    {
+      "year": 2025,
+      "lines": ["+ Rent", "+ Other Income"],
+      "reason": "Other Income was deliberately merged into Rent in the app (2026-08-16). The spreadsheet still splits the two; total income is unchanged."
+    }
+  ]
+}

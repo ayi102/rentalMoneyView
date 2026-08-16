@@ -15,6 +15,11 @@
  *  3. Categories — every category and subcategory, both directions, so a line
  *     present in one and missing from the other is reported rather than ignored.
  *
+ * Differences you've made on purpose can be recorded in compare-exceptions.json so
+ * the check doesn't stay permanently red. Those only ever apply when the year's
+ * totals still match, so they can excuse a reclassification but never a change in
+ * the money itself. Pass --strict to ignore the file entirely.
+ *
  * Exit code 1 if anything disagrees, so it can be run as a check.
  */
 import fs from "node:fs";
@@ -27,6 +32,7 @@ const prisma = new PrismaClient();
 
 const args = process.argv.slice(2);
 const showAll = args.includes("--all");
+const strict = args.includes("--strict");
 const yearFlag = args.indexOf("--year");
 const onlyYear = yearFlag !== -1 ? Number(args[yearFlag + 1]) : null;
 const dirArg = args.find(
@@ -47,6 +53,35 @@ interface Line {
   sheet: number;
   app: number;
 }
+
+interface AcceptedDifference {
+  year: number;
+  lines: string[];
+  reason: string;
+}
+
+/**
+ * Load the intended-differences file. Missing file is fine — it just means every
+ * difference is unexpected.
+ */
+function loadExceptions(): AcceptedDifference[] {
+  if (strict) return [];
+  const file = path.resolve("compare-exceptions.json");
+  if (!fs.existsSync(file)) return [];
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    return Array.isArray(parsed.acceptedDifferences)
+      ? parsed.acceptedDifferences
+      : [];
+  } catch (e) {
+    // Don't silently ignore a malformed file — that would quietly turn the check
+    // back into a strict one and the accepted differences would look like failures.
+    console.error(`compare-exceptions.json could not be parsed: ${String(e)}`);
+    process.exit(1);
+  }
+}
+
+const exceptions = loadExceptions();
 
 /** Key a ledger line the same way on both sides. */
 function keyOf(category: string, subcategory: string | null): string {
@@ -181,14 +216,45 @@ async function main() {
     }));
 
     const badTotals = totals.filter((l) => !near(l.sheet, l.app));
-    const badCategories = categoryLines.filter((l) => !near(l.sheet, l.app));
+    const differingCategories = categoryLines.filter((l) => !near(l.sheet, l.app));
+
+    // An acceptance can only excuse money being reclassified between lines, never
+    // money appearing or vanishing — so it applies only while every total matches.
+    // If a total has moved, the year fails no matter what the file says.
+    const totalsIntact = badTotals.length === 0;
+    const acceptedLines = new Set(
+      totalsIntact
+        ? exceptions
+            .filter((x) => x.year === year)
+            .flatMap((x) => x.lines)
+        : [],
+    );
+    const accepted = differingCategories.filter((l) => acceptedLines.has(l.label));
+    const badCategories = differingCategories.filter(
+      (l) => !acceptedLines.has(l.label),
+    );
+
     const ok =
-      internalOpEx && internalNOI && badTotals.length === 0 && badCategories.length === 0;
+      internalOpEx && internalNOI && totalsIntact && badCategories.length === 0;
     if (!ok) anyProblem = true;
 
+    const acceptedNote =
+      accepted.length > 0 ? `, ${accepted.length} accepted` : "";
     console.log(
-      `${year}  ${ok ? "✅ matches" : "❌ differs"}   (${txns.length} app rows, ${p.entries.length} sheet rows)`,
+      `${year}  ${ok ? "✅ matches" : "❌ differs"}   (${txns.length} app rows, ${p.entries.length} sheet rows${acceptedNote})`,
     );
+
+    // Always name what was excused — an accepted difference must stay visible, or
+    // the file becomes a place where real problems go to hide.
+    for (const l of accepted) {
+      const reason =
+        exceptions.find((x) => x.year === year && x.lines.includes(l.label))
+          ?.reason ?? "";
+      console.log(
+        `      ≈ accepted  ${l.label.padEnd(28)} sheet ${money(l.sheet)}  app ${money(l.app)}`,
+      );
+      if (reason) console.log(`        ${reason}`);
+    }
 
     if (!internalOpEx) {
       console.log(
@@ -204,7 +270,9 @@ async function main() {
     }
 
     const show = (lines: Line[], heading: string) => {
-      const rows = showAll ? lines : lines.filter((l) => !near(l.sheet, l.app));
+      const rows = showAll
+        ? lines
+        : lines.filter((l) => !near(l.sheet, l.app) && !acceptedLines.has(l.label));
       if (rows.length === 0) return;
       console.log(`      ${heading}`);
       console.log(
@@ -224,11 +292,19 @@ async function main() {
     if (!ok || showAll) console.log("");
   }
 
-  console.log(
-    anyProblem
-      ? "\nSome years differ. Lines marked ❌ are where the app and the sheet disagree."
-      : "\nEvery year matches the spreadsheets.",
-  );
+  const acceptedCount = exceptions.reduce((n, x) => n + x.lines.length, 0);
+  if (anyProblem) {
+    console.log(
+      "\nSome years differ. Lines marked ❌ are where the app and the sheet disagree.",
+    );
+  } else if (acceptedCount > 0) {
+    console.log(
+      `\nEvery year matches, allowing ${acceptedCount} intended difference(s) from ` +
+        `compare-exceptions.json. Run with --strict to see them as failures.`,
+    );
+  } else {
+    console.log("\nEvery year matches the spreadsheets.");
+  }
   process.exit(anyProblem ? 1 : 0);
 }
 

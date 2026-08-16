@@ -18,6 +18,11 @@
   ],
   "acceptedDifferences": [
     {
+      "year": 2023,
+      "lines": ["+ Rent", "+ Other Income"],
+      "reason": "Part of Other Income was deliberately reclassified as Rent in the app (2026-08-16). The spreadsheet still splits it the old way; total income is unchanged."
+    },
+    {
       "year": 2025,
       "lines": ["+ Rent", "+ Other Income"],
       "reason": "Other Income was deliberately merged into Rent in the app (2026-08-16). The spreadsheet still splits the two; total income is unchanged."

@@ -34,10 +34,12 @@ export const viewport: Viewport = {
   ],
 };
 
+// Names say what you DO on each page. The routes deliberately keep their original
+// paths so existing bookmarks and the home-screen app's start_url still work.
 const navLinks = [
-  { href: "/", label: "All Years" },
-  { href: "/worksheet", label: "Worksheet" },
-  { href: "/projection", label: "Projection" },
+  { href: "/", label: "Overview" },
+  { href: "/worksheet", label: "Edit Year" },
+  { href: "/projection", label: "Forecast" },
 ];
 
 export default async function RootLayout({

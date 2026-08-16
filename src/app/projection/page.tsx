@@ -52,7 +52,7 @@ export default async function ProjectionPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold">Projection & returns</h1>
+        <h1 className="text-xl font-semibold">Forecast & returns</h1>
         <p className="text-sm text-muted">
           {property.name} · return if sold today, and value over time. Everything
           recomputes from your live data.

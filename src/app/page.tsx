@@ -49,9 +49,9 @@ export default async function HomeAllYears() {
       <div className="rounded-xl border border-border bg-surface p-8 text-center">
         <h1 className="text-lg font-semibold">No property yet</h1>
         <p className="mt-2 text-sm text-muted">
-          Run the local seed, or enter figures in the{" "}
+          Run the local seed, or enter figures under{" "}
           <Link href="/worksheet" className="text-accent underline">
-            worksheet
+            Edit Year
           </Link>
           .
         </p>
@@ -71,7 +71,7 @@ export default async function HomeAllYears() {
       <div>
         <h1 className="text-xl font-semibold">{property.name}</h1>
         <p className="text-sm text-muted">
-          All-years overview · where you stand across every year
+          Overview · where you stand across every year
         </p>
       </div>
 
@@ -221,7 +221,7 @@ export default async function HomeAllYears() {
       </section>
 
       <p className="text-xs text-muted">
-        Click a year to open its worksheet. <strong>Net Position</strong> uses only
+        Click a year to edit it. <strong>Net Position</strong> uses only
         what you know for certain — cash earned, principal paid down, and the{" "}
         {currency(s.purchaseCosts)} of buy-in costs — with <em>no</em> guess at the
         home&apos;s market value. Your {currency(s.initialInvestment - s.purchaseCosts)}{" "}

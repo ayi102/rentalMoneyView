@@ -3,6 +3,7 @@
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
+import { getYearVersion } from "@/lib/metrics";
 
 export interface WorksheetSaveItem {
   kind: "income" | "expense";
@@ -28,12 +29,22 @@ export interface WorksheetSaveTrip {
  * (both counted line items and excluded items). Each item is one transaction,
  * so itemizing within a category is preserved. Booked at a mid-year date.
  */
+export type SaveResult =
+  | { ok: true; version: string }
+  | { ok: false; reason: "conflict" };
+
 export async function saveWorksheet(
   propertyId: string,
   year: number,
   items: WorksheetSaveItem[],
   trips: WorksheetSaveTrip[] = [],
-) {
+  /**
+   * The version the form loaded with. If the year has changed since — another
+   * device, another tab — the save is refused rather than silently replacing
+   * whatever landed in the meantime. Omit to skip the check.
+   */
+  expectedVersion?: string,
+): Promise<SaveResult> {
   // A Server Action is a public HTTP endpoint — check auth before touching data.
   await requireUser();
 
@@ -41,6 +52,13 @@ export async function saveWorksheet(
     where: { id: propertyId },
   });
   if (!property) throw new Error("Property not found");
+
+  if (expectedVersion !== undefined) {
+    const current = await getYearVersion(propertyId, year);
+    if (current !== expectedVersion) {
+      return { ok: false, reason: "conflict" };
+    }
+  }
 
   // Mid-year date, but never before the month after purchase.
   let date = new Date(Date.UTC(year, 6, 1));
@@ -115,6 +133,9 @@ export async function saveWorksheet(
   revalidatePath("/");
   revalidatePath("/worksheet");
   revalidatePath("/projection");
+
+  // Hand back the new token so an autosaving form can continue without reloading.
+  return { ok: true, version: await getYearVersion(propertyId, year) };
 }
 
 /** Delete every entry (and mileage) for a property in a given year. */

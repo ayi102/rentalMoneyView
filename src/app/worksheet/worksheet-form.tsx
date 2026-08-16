@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   deleteYear,
@@ -57,9 +57,13 @@ const trackedSum = (items: Item[]) =>
 const untrackedSum = (items: Item[]) =>
   items.reduce((s, it) => s + (!it.tracked ? parseFloat(it.amount) || 0 : 0), 0);
 
+/** How long to wait after typing stops before autosaving. */
+const AUTOSAVE_DELAY_MS = 2000;
+
 export function WorksheetForm({
   propertyId,
   year,
+  version: initialVersion,
   groups: initialGroups,
   capital: initialCapital,
   trips: initialTrips,
@@ -67,6 +71,7 @@ export function WorksheetForm({
 }: {
   propertyId: string;
   year: number;
+  version: string;
   groups: WorksheetGroup[];
   capital: WorksheetItem[];
   trips: WorksheetTrip[];
@@ -107,6 +112,20 @@ export function WorksheetForm({
   const [dirty, setDirty] = useState(false);
   const [saved, setSaved] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [version, setVersion] = useState(initialVersion);
+  const [conflict, setConflict] = useState(false);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+
+  // How many lines the year had when it loaded. Autosave compares against this to
+  // avoid quietly persisting a mass deletion — see blockedReason. Captured once at
+  // mount; the page keys this component by year, so it remounts when the year
+  // changes and this is recomputed.
+  const [initialLineCount] = useState(
+    () =>
+      initialGroups.reduce((n, g) => n + g.items.length, 0) +
+      initialCapital.length +
+      initialTrips.length,
+  );
 
   const touch = () => {
     setDirty(true);
@@ -257,55 +276,135 @@ export function WorksheetForm({
     }
   }
 
-  async function onSave() {
-    setPending(true);
-    try {
-      const items: WorksheetSaveItem[] = [];
-      for (const g of groups) {
-        for (const it of g.items) {
-          const amt = parseFloat(it.amount) || 0;
-          if (amt === 0) continue;
-          items.push({
-            kind: g.kind,
-            category: g.category,
-            subcategory: g.subcategory,
-            amount: amt,
-            description: it.description,
-            countsTowardCost: it.tracked,
-          });
-        }
-      }
-      for (const c of capital) {
-        const amt = parseFloat(c.amount) || 0;
+  const buildPayload = useCallback(() => {
+    const items: WorksheetSaveItem[] = [];
+    for (const g of groups) {
+      for (const it of g.items) {
+        const amt = parseFloat(it.amount) || 0;
         if (amt === 0) continue;
         items.push({
-          kind: "expense",
-          category: "Capital Additions",
-          subcategory: null,
+          kind: g.kind,
+          category: g.category,
+          subcategory: g.subcategory,
           amount: amt,
-          description: c.description,
-          countsTowardCost: c.tracked,
-          isCapital: true,
+          description: it.description,
+          countsTowardCost: it.tracked,
         });
       }
-      const tripPayload: WorksheetSaveTrip[] = trips
-        .filter((t) => (parseFloat(t.miles) || 0) > 0)
-        .map((t) => ({
-          date: t.date,
-          source: t.source,
-          destination: t.destination,
-          reason: t.reason,
-          miles: parseFloat(t.miles) || 0,
-        }));
-
-      await saveWorksheet(propertyId, year, items, tripPayload);
-      setDirty(false);
-      setSaved(true);
-      router.refresh();
-    } finally {
-      setPending(false);
     }
-  }
+    for (const c of capital) {
+      const amt = parseFloat(c.amount) || 0;
+      if (amt === 0) continue;
+      items.push({
+        kind: "expense",
+        category: "Capital Additions",
+        subcategory: null,
+        amount: amt,
+        description: c.description,
+        countsTowardCost: c.tracked,
+        isCapital: true,
+      });
+    }
+    const tripPayload: WorksheetSaveTrip[] = trips
+      .filter((t) => (parseFloat(t.miles) || 0) > 0)
+      .map((t) => ({
+        date: t.date,
+        source: t.source,
+        destination: t.destination,
+        reason: t.reason,
+        miles: parseFloat(t.miles) || 0,
+      }));
+    return { items, tripPayload };
+  }, [groups, capital, trips]);
+
+  /**
+   * Why autosave is currently held back, or null if it's free to run.
+   *
+   * Saving replaces the whole year, so a state that drops most of the lines would
+   * genuinely delete them. That's fine as a deliberate act and alarming as a
+   * side-effect of typing, so big reductions wait for an explicit Save.
+   */
+  const blockedReason = useMemo(() => {
+    const { items, tripPayload } = buildPayload();
+    const now = items.length + tripPayload.length;
+    const before = initialLineCount;
+    if (before === 0) return null; // nothing to lose
+    if (now === 0) return "this would clear every line";
+    if (now < before / 2) {
+      return `this removes ${before - now} of ${before} lines`;
+    }
+    return null;
+  }, [buildPayload, initialLineCount]);
+
+  const save = useCallback(
+    async (auto: boolean) => {
+      const { items, tripPayload } = buildPayload();
+      setPending(true);
+      try {
+        const res = await saveWorksheet(
+          propertyId,
+          year,
+          items,
+          tripPayload,
+          version,
+        );
+        if (!res.ok) {
+          // Someone else saved this year since the form loaded. Don't overwrite.
+          setConflict(true);
+          return;
+        }
+        setVersion(res.version);
+        setDirty(false);
+        setSaved(true);
+        setSavedAt(
+          new Date().toLocaleTimeString("en-US", {
+            hour: "numeric",
+            minute: "2-digit",
+          }),
+        );
+        // Only re-render on an explicit save — refreshing mid-typing would yank
+        // the page around under the user.
+        if (!auto) router.refresh();
+      } finally {
+        setPending(false);
+      }
+    },
+    [buildPayload, propertyId, year, version, router],
+  );
+
+  // Autosave: fires once typing has been idle for a moment.
+  useEffect(() => {
+    if (!dirty || pending || conflict || blockedReason) return;
+    const t = setTimeout(() => void save(true), AUTOSAVE_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [dirty, pending, conflict, blockedReason, save]);
+
+  // Flush before the page goes away. On a phone, backgrounding the app is the
+  // most likely way to lose the last few seconds of edits.
+  useEffect(() => {
+    const flush = () => {
+      if (dirty && !pending && !conflict && !blockedReason) void save(true);
+    };
+    const onHide = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", flush);
+    };
+  }, [dirty, pending, conflict, blockedReason, save]);
+
+  // Last line of defence for the cases autosave deliberately won't handle.
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  const onSave = () => void save(false);
 
   const incomeGroups = groups
     .map((g, i) => ({ g, i }))
@@ -316,6 +415,60 @@ export function WorksheetForm({
 
   return (
     <div className="space-y-4">
+      {/* The year changed elsewhere. Saving would replace whatever landed, so the
+          only safe options are to reload or to deliberately overwrite. */}
+      {conflict && (
+        <div
+          role="alert"
+          className="rounded-xl border border-negative/40 bg-negative/10 p-4"
+        >
+          <p className="text-sm font-semibold text-negative">
+            {year} was changed somewhere else
+          </p>
+          <p className="mt-1 text-sm text-muted">
+            Another device or tab saved this year after you opened it. Saving now
+            would replace those changes, so autosave has stopped. Your edits on
+            this screen are still here.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              onClick={() => router.refresh()}
+              className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white"
+            >
+              Reload {year} (discards edits on this screen)
+            </button>
+            <button
+              onClick={async () => {
+                // Explicit override: drop the version check for one save.
+                const { items, tripPayload } = buildPayload();
+                setPending(true);
+                try {
+                  const res = await saveWorksheet(
+                    propertyId,
+                    year,
+                    items,
+                    tripPayload,
+                  );
+                  if (res.ok) {
+                    setVersion(res.version);
+                    setConflict(false);
+                    setDirty(false);
+                    setSaved(true);
+                    router.refresh();
+                  }
+                } finally {
+                  setPending(false);
+                }
+              }}
+              disabled={pending}
+              className="rounded-md border border-border px-3 py-1.5 text-sm text-muted hover:text-foreground disabled:opacity-50"
+            >
+              Keep mine and overwrite
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-2">
         {renderSection("Income", incomeGroups, totals.income)}
         {renderSection("Expenses", expenseGroups, totals.expense)}
@@ -443,8 +596,21 @@ export function WorksheetForm({
         >
           {pending ? "Saving…" : `Save ${year}`}
         </button>
-        {dirty && !pending && <span className="text-sm text-muted">Unsaved changes</span>}
-        {saved && !dirty && <span className="text-sm text-positive">Saved ✓</span>}
+        {pending && <span className="text-sm text-muted">Saving…</span>}
+        {!pending && dirty && !blockedReason && !conflict && (
+          <span className="text-sm text-muted">Unsaved changes</span>
+        )}
+        {!pending && !dirty && saved && (
+          <span className="text-sm text-positive">
+            Saved{savedAt ? ` ${savedAt}` : ""} ✓
+          </span>
+        )}
+        {/* Autosave stood down: say so, and why, rather than looking broken. */}
+        {!pending && dirty && blockedReason && !conflict && (
+          <span className="text-sm text-negative">
+            Not autosaved — {blockedReason}. Press Save to confirm.
+          </span>
+        )}
         {/* Help text is desktop-only — on a phone the toolbar needs the room. */}
         <span className="hidden text-xs text-muted sm:ml-auto sm:inline">
           One line = a single value; “+ itemize” to break it out. Untick the dot to keep

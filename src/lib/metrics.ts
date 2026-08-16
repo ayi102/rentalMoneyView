@@ -153,10 +153,52 @@ export interface WorksheetTrip {
   miles: number;
 }
 
+/**
+ * A cheap token identifying the current saved state of one year.
+ *
+ * Saving replaces the whole year, so two devices editing the same year would
+ * otherwise silently clobber each other. The form sends the token it loaded with,
+ * and the save is refused if it no longer matches.
+ *
+ * Row counts are included alongside the newest timestamp because deleting rows
+ * can leave the maximum timestamp unchanged.
+ */
+export async function getYearVersion(
+  propertyId: string,
+  year: number,
+): Promise<string> {
+  const range = {
+    gte: new Date(Date.UTC(year, 0, 1)),
+    lt: new Date(Date.UTC(year + 1, 0, 1)),
+  };
+  const [txn, mileage] = await Promise.all([
+    prisma.transaction.aggregate({
+      where: { propertyId, date: range },
+      _max: { updatedAt: true },
+      _count: true,
+    }),
+    prisma.mileageEntry.aggregate({
+      where: { propertyId, date: range },
+      // MileageEntry has no updatedAt; rows are replaced wholesale, so createdAt
+      // moves on every save anyway.
+      _max: { createdAt: true },
+      _count: true,
+    }),
+  ]);
+  return [
+    txn._count,
+    txn._max.updatedAt?.getTime() ?? 0,
+    mileage._count,
+    mileage._max.createdAt?.getTime() ?? 0,
+  ].join(":");
+}
+
 export interface WorksheetData {
   property: Property;
   year: number;
   availableYears: number[];
+  /** Token for conflict detection; see getYearVersion. */
+  version: string;
   groups: WorksheetGroup[];
   capital: WorksheetItem[]; // capital additions (isCapital), their own section
   trips: WorksheetTrip[]; // mileage log for the year
@@ -171,10 +213,11 @@ export async function getWorksheetData(
   property: Property,
   year: number,
 ): Promise<WorksheetData> {
-  const [categories, txns, mileage] = await Promise.all([
+  const [categories, txns, mileage, version] = await Promise.all([
     prisma.category.findMany({ orderBy: { sortOrder: "asc" } }),
     getTransactionsForYear(property.id, year),
     getMileageForYear(property.id, year),
+    getYearVersion(property.id, year),
   ]);
 
   // A category is a "container" if other categories name it as parent.
@@ -267,6 +310,7 @@ export async function getWorksheetData(
     property,
     year,
     availableYears: await getAvailableYears(property.id),
+    version,
     groups,
     capital,
     trips: mileage.map((m) => ({

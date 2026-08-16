@@ -103,6 +103,7 @@ export default async function WorksheetPage({
         key={year}
         propertyId={property.id}
         year={year}
+        version={data.version}
         groups={data.groups}
         capital={data.capital}
         trips={data.trips}
